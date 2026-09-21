@@ -1,9 +1,14 @@
 venv/
 build/
+.secrets.env
 *.charm
+*.rock
+.venv/
 .tox/
 .coverage
 __pycache__/
 *.py[cod]
+.ruff_cache/
+.pytest_cache/
 .idea
 .vscode/

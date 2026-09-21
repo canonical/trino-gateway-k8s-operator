@@ -1,4 +1,4 @@
-# Copyright 2026 Ubuntu
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Functions for interacting with the workload.

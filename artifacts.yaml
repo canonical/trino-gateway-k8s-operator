@@ -1,0 +1,16 @@
+version: 1
+rocks:
+  - name: trino-gateway
+    rockcraft-yaml: trino_gateway_rock/rockcraft.yaml
+    platforms:
+      - arch: amd64
+charms:
+  - name: trino-gateway-k8s
+    charmcraft-yaml: charmcraft.yaml
+    resources:
+      trino-gateway-image:
+        type: oci-image
+        rock: trino-gateway
+    platforms:
+      - arch: amd64
+    channel: latest/edge

@@ -1,39 +1,10 @@
-# Copyright 2026 Ubuntu
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 #
-# The integration tests use the Jubilant library and the pytest-jubilant plugin.
-# See https://canonical.com/juju/docs/ops/latest/howto/write-integration-tests-for-a-charm/
-#
-# pytest-jubilant provides a module-scoped `juju` fixture that creates a temporary Juju model.
-# The `charm` fixture is defined in conftest.py.
-
-import logging
-import pathlib
-
 import jubilant
-import pytest
-import yaml
-
-logger = logging.getLogger(__name__)
-
-METADATA = yaml.safe_load(pathlib.Path("charmcraft.yaml").read_text())
 
 
-@pytest.mark.juju_setup
-def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
+def test_deploy(charm_path: str, resource_images: dict[str, str], juju: jubilant.Juju):
     """Deploy the charm under test."""
-    resources = {
-        "some-container-image": METADATA["resources"]["some-container-image"]["upstream-source"]
-    }
-    juju.deploy(charm, app="trino-gateway-k8s-operator", resources=resources)
+    juju.deploy(charm_path, app="trino-gateway-k8s", resources=resource_images)
     juju.wait(jubilant.all_active)
-
-
-# If you implement trino_gateway.get_version in the charm source,
-# remove the @pytest.mark.skip line to enable this test.
-# Alternatively, remove this test if you don't need it.
-@pytest.mark.skip(reason="trino_gateway.get_version is not implemented")
-def test_workload_version_is_set(charm: pathlib.Path, juju: jubilant.Juju):
-    """Check that the correct version of the workload is running."""
-    version = juju.status().apps["trino-gateway-k8s-operator"].version
-    assert version == "3.14"  # Replace 3.14 by the expected version of the workload.

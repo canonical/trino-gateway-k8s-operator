@@ -1,5 +1,5 @@
 type: charm
-name: trino-gateway-k8s-operator
+name: trino-gateway-k8s
 title: Trino Gateway
 summary: |
   Trino Gateway is a load balancer, proxy server, and configurable routing gateway for multiple Trino clusters.
@@ -29,9 +29,6 @@ parts:
     source: .
     build-snaps:
       - astral-uv
-
-config:
-  options:
 
 containers:
   trino-gateway:

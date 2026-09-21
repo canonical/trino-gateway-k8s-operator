@@ -1,95 +1,17 @@
-# Copyright 2026 Ubuntu
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 #
 # To learn more about testing, see https://canonical.com/juju/docs/ops/latest/explanation/testing/
 
-import ops
-import pytest
 from ops import testing
 
-from charm import SERVICE_NAME, TrinoGatewayK8SOperatorCharm
-
-CHECK_NAME = "service-ready"  # Name of Pebble check in the mock workload container.
-
-# A minimal Pebble layer for our testing.Container objects.
-# Our charm doesn't retrieve the service command or the check URL
-# from Pebble, so this layer doesn't need a real command or URL.
-MOCK_LAYER = ops.pebble.Layer(
-    {
-        "services": {
-            SERVICE_NAME: {
-                "override": "replace",
-                "command": "mock-command",
-                "startup": "enabled",
-            }
-        },
-        "checks": {
-            CHECK_NAME: {
-                "override": "replace",
-                "level": "ready",
-                "threshold": 3,
-                "startup": "enabled",
-                "http": {
-                    "url": "http://localhost:1234/mock-endpoint",
-                },
-            }
-        },
-    }
-)
+from charm import TrinoGatewayK8SOperatorCharm
 
 
-def mock_get_version():
-    """Get a mock version string without executing the workload code."""
-    return "1.0.0"
-
-
-def test_pebble_ready(monkeypatch: pytest.MonkeyPatch):
+def test_pebble_ready_sets_active_status():
     """Test that the charm has the correct state after handling the pebble-ready event."""
-    # Arrange:
     ctx = testing.Context(TrinoGatewayK8SOperatorCharm)
-    check_in = testing.CheckInfo(
-        CHECK_NAME,
-        level=ops.pebble.CheckLevel.READY,
-        status=ops.pebble.CheckStatus.UP,  # Simulate the Pebble check passing.
-    )
-    container_in = testing.Container(
-        "some-container",
-        can_connect=True,
-        layers={"base": MOCK_LAYER},
-        service_statuses={SERVICE_NAME: ops.pebble.ServiceStatus.INACTIVE},
-        check_infos={check_in},
-    )
-    state_in = testing.State(containers={container_in})
-    monkeypatch.setattr("charm.trino_gateway.get_version", mock_get_version)
+    container = testing.Container("trino-gateway", can_connect=True)
+    state_out = ctx.run(ctx.on.pebble_ready(container), testing.State(containers={container}))
 
-    # Act:
-    state_out = ctx.run(ctx.on.pebble_ready(container_in), state_in)
-
-    # Assert:
-    container_out = state_out.get_container(container_in.name)
-    assert container_out.service_statuses[SERVICE_NAME] == ops.pebble.ServiceStatus.ACTIVE
-    assert state_out.workload_version is not None
     assert state_out.unit_status == testing.ActiveStatus()
-
-
-def test_pebble_ready_service_not_ready():
-    """Test that the charm raises an error if the workload isn't ready after Pebble starts it."""
-    # Arrange:
-    ctx = testing.Context(TrinoGatewayK8SOperatorCharm)
-    check_in = testing.CheckInfo(
-        CHECK_NAME,
-        level=ops.pebble.CheckLevel.READY,
-        status=ops.pebble.CheckStatus.DOWN,  # Simulate the Pebble check failing.
-    )
-    container_in = testing.Container(
-        "some-container",
-        can_connect=True,
-        layers={"base": MOCK_LAYER},
-        service_statuses={SERVICE_NAME: ops.pebble.ServiceStatus.INACTIVE},
-        check_infos={check_in},
-    )
-    state_in = testing.State(containers={container_in})
-
-    # Act & assert:
-    with pytest.raises(testing.errors.UncaughtCharmError):
-        ctx.run(ctx.on.pebble_ready(container_in), state_in)

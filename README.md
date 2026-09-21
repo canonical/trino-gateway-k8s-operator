@@ -10,8 +10,8 @@ Use links instead.
 
 # trino-gateway-k8s-operator
 
-Charmhub package name: trino-gateway-k8s-operator
-More information: https://charmhub.io/trino-gateway-k8s-operator
+Charmhub package name: trino-gateway-k8s
+More information: https://charmhub.io/trino-gateway-k8s
 
 Describe your charm in one or two sentences.
 

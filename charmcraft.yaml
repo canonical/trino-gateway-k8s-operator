@@ -1,24 +1,23 @@
-# This file configures Charmcraft.
-# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
 type: charm
 name: trino-gateway-k8s-operator
-title: Charm Template
-summary: A very short one-line summary of the charm.
+title: Trino Gateway
+summary: |
+  Trino Gateway is a load balancer, proxy server, and configurable routing gateway for multiple Trino clusters.
 description: |
-  A single sentence that says what the charm is, concisely and memorably.
+  Trino Gateway is a load balancer, proxy server, and configurable routing gateway for multiple Trino clusters.
 
-  A paragraph of one to three short sentences, that describe what the charm does.
+  It allows:
+    - a single connections URL for clients to run against multiple Trino clusters,
+    - automatic routing of queries to specific Trino clustes based on workloads, queries, and data sources;
+    - no downtime updates for Trino clusters behind the Gateway,
+    - transparent change of capacity of Trino clusters without user interruptions.
 
-  A third paragraph that explains what need the charm meets.
+  The Trino Gateway charm simplifies the configuration and operation of Trino Gateways against multiple Trino clusters
+  and can be used by anyone that runs one or more Trino charms on various clouds.
 
-  Finally, a paragraph that describes whom the charm is useful for.
-
-# Documentation:
-# https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/
 base: ubuntu@24.04
 platforms:
   amd64:
-  arm64:
 
 assumes:
   - juju >= 3.6
@@ -31,41 +30,14 @@ parts:
     build-snaps:
       - astral-uv
 
-# (Optional) Configuration options for the charm
-# This config section defines charm config options, and populates the Configure
-# tab on Charmhub.
-# More information on this section at:
-# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#config
-# General configuration documentation:
-# https://documentation.ubuntu.com/juju/3.6/reference/configuration/#application-configuration
 config:
   options:
-    # An example config option to customise the log level of the workload
-    log-level:
-      description: |
-        Configures the log level of gunicorn.
 
-        Acceptable values are: "info", "debug", "warning", "error" and "critical"
-      default: "info"
-      type: string
-
-# Your workload's containers.
-# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#containers
 containers:
-  some-container:
-    resource: some-container-image
+  trino-gateway:
+    resource: trino-gateway-image
 
-# This field populates the Resources tab on Charmhub.
-# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#resources
 resources:
-  # An OCI image resource for each container listed above.
-  # You may remove this if your charm will run without a workload sidecar container.
-  some-container-image:
+  trino-gateway-image:
     type: oci-image
-    description: OCI image for the 'some-container' container
-    # The upstream-source field is ignored by Charmcraft and Juju, but it can be
-    # useful to developers in identifying the source of the OCI image.  It is also
-    # used by the 'canonical/charming-actions' GitHub action for automated releases.
-    # The test_deploy function in tests/integration/test_charm.py reads upstream-source
-    # to determine which OCI image to use when running the charm's integration tests.
-    upstream-source: some-repo/some-image:some-tag
+    description: OCI image for the 'trino-gateway' container

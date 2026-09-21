@@ -1,17 +1,13 @@
-name: my-rock-name
-# see https://documentation.ubuntu.com/rockcraft/1.20.0/explanation/bases/
-# for more information about bases and using 'bare' bases for chiselled rocks
-base: ubuntu@24.04 # the base environment for this rock
-version: '0.1' # just for humans. Semantic versioning is recommended
-summary: Single-line elevator pitch for your amazing rock # 79 char long summary
+name: trino-gateway
+base: bare
+version: '0.1'
+summary: Packages Trino Gateway in an OCI image.
 description: |
-    This is my-rock-name's description. You have a paragraph or two to tell the
-    most important story about it. Keep it under 100 words though,
-    we live in tweetspace and your description wants to look good in the
-    container registries out there.
-platforms: # the platforms this rock should be built on and run on
+    The Trino Gateway rock packages application binaries
+    together with its dependencies to be used by the
+    Trino Gateway charm.
+platforms:
     amd64:
 
 parts:
-    my-part:
-        plugin: nil
+    

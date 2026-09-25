@@ -1,0 +1,43 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+type: charm
+name: trino-gateway-k8s
+title: Trino Gateway
+summary: |
+  Trino Gateway is a load balancer, proxy server, and configurable routing gateway for multiple Trino clusters.
+description: |
+  Trino Gateway is a load balancer, proxy server, and configurable routing gateway for multiple Trino clusters.
+
+  It allows:
+    - a single connections URL for clients to run against multiple Trino clusters,
+    - automatic routing of queries to specific Trino clustes based on workloads, queries, and data sources;
+    - no downtime updates for Trino clusters behind the Gateway,
+    - transparent change of capacity of Trino clusters without user interruptions.
+
+  The Trino Gateway charm simplifies the configuration and operation of Trino Gateways against multiple Trino clusters
+  and can be used by anyone that runs one or more Trino charms on various clouds.
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+
+containers:
+  trino-gateway:
+    resource: trino-gateway-image
+
+resources:
+  trino-gateway-image:
+    type: oci-image
+    description: OCI image for the 'trino-gateway' container

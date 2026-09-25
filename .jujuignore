@@ -1,0 +1,14 @@
+.git
+.tox
+.venv
+build
+tests
+trino_gateway_rock
+*.rock
+*.charm
+.coverage
+__pycache__
+*.py[cod]
+.ruff_cache
+.pytest_cache
+.secrets.env

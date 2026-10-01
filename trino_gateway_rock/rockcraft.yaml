@@ -4,7 +4,7 @@
 name: trino-gateway
 base: bare
 build-base: ubuntu@24.04
-version: '0.1'
+version: '21'
 summary: Packages Trino Gateway in an OCI image.
 description: |
     The Trino Gateway rock packages application binaries
@@ -17,13 +17,23 @@ platforms:
 services:
     trino-gateway:
         override: replace
-        command: /bin/bash -c 'while true; do sleep 3600; done'
+        command: /usr/lib/jvm/java-25-openjdk-amd64/bin/java -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80 -jar /usr/lib/trino-gateway/gateway-ha-jar-with-dependencies.jar /etc/trino-gateway/config.yaml
         startup: enabled
 
 parts:
     trino-gateway:
+        plugin: dump
+        source: https://maven-central.storage-download.googleapis.com/maven2/io/trino/gateway/gateway-ha/21/gateway-ha-21-jar-with-dependencies.jar
+        source-type: file
+        source-checksum: sha256/374d0ca46f5816f61b7ddf6b0961e92b3572ec2be30075373e93243ae35e0a68
+        organize:
+            gateway-ha-21-jar-with-dependencies.jar: usr/lib/trino-gateway/gateway-ha-jar-with-dependencies.jar
+
+    runtime-packages:
         plugin: nil
         stage-packages:
-            - bash
-            - coreutils
+            - base-files
+            - ca-certificates
+            - openjdk-25-jre-headless
+            - libstdc++6
 

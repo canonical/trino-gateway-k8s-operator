@@ -9,7 +9,9 @@ backends:
   integration-test:
     type: integration-test
     systems:
-      - ubuntu-24.04
+      # The Juju controller claims a 20Gi volume, so opcli's 20GiB default local VM disk is too small.
+      - ubuntu-24.04:
+          disk: 30
 environment:
   CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
   OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'

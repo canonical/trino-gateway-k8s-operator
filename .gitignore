@@ -1,6 +1,7 @@
 venv/
 build/
 .secrets.env
+.spread-reuse.*.yaml
 *.charm
 *.rock
 .venv/

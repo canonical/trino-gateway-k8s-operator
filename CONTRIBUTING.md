@@ -35,6 +35,11 @@ opcli artifacts build
 opcli spread run
 ```
 
+Local Spread runs use an LXD VM whose root disk size comes from `disk` in `spread.yaml`. Keep
+it at 30GiB or more: the Juju controller claims a 20Gi volume, so a 20GiB disk leaves the
+controller pending forever. To override it for one run, set `DISK` (GiB), e.g.
+`DISK=40 opcli spread run`. `CPU` and `MEM` work the same way.
+
 Discover available Spread selectors with:
 
 ```shell

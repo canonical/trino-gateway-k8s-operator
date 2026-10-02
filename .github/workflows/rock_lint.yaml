@@ -1,0 +1,24 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: Rock lint
+
+on:
+  pull_request:
+    paths:
+      - trino_gateway_rock/**
+      - .github/workflows/rock_lint.yaml
+
+jobs:
+  lint:
+    name: Lint rock tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: trino_gateway_rock
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo snap install astral-uv --classic
+      - run: uv tool run --with tox-uv tox -e lint

@@ -13,14 +13,11 @@ from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 import gateway_api
 import workload
 from config import CharmConfig, describe_error
+from constants import CONTAINER_NAME, DATABASE_NAME, HTTP_PORT, POSTGRESQL_RELATION
 from gateway_api import GatewayApiClient, GatewayApiError
 from workload import PostgresRelationModel
 
 logger = logging.getLogger(__name__)
-
-CONTAINER_NAME = "trino-gateway"
-POSTGRESQL_RELATION = "postgresql"
-DATABASE_NAME = "trino_gateway"
 
 
 class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
@@ -55,7 +52,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             return
 
         workload.apply(self._container, workload.render_config(pg))
-        self.unit.set_ports(workload.HTTP_PORT)
+        self.unit.set_ports(HTTP_PORT)
 
         if not self.unit.is_leader():
             return
@@ -65,7 +62,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             return
         try:
             gateway_api.sync_backends(
-                GatewayApiClient(f"http://localhost:{workload.HTTP_PORT}"), config.backends
+                GatewayApiClient(f"http://localhost:{HTTP_PORT}"), config.backends
             )
         except GatewayApiError as e:
             # The gateway may still be starting after a restart; a later hook converges.

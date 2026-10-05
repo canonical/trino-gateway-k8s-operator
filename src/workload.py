@@ -12,11 +12,13 @@ import ops
 import pydantic
 import yaml
 
-SERVICE_NAME = "trino-gateway"
-CONFIG_PATH = "/etc/trino-gateway/config.yaml"
-HTTP_PORT = 8080
-WORKLOAD_USER = "_daemon_"
-DEFAULT_ROUTING_GROUP = "adhoc"
+from constants import (
+    CONFIG_PATH,
+    DEFAULT_ROUTING_GROUP,
+    HTTP_PORT,
+    SERVICE_NAME,
+    WORKLOAD_USER,
+)
 
 
 class PostgresRelationModel(pydantic.BaseModel):

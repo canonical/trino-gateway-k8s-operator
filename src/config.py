@@ -11,7 +11,7 @@ import pydantic
 import yaml
 
 # Up to 63 characters, starting with a letter or digit.
-BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+_BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
 
 
 class BackendConfig(pydantic.BaseModel):
@@ -25,8 +25,8 @@ class BackendConfig(pydantic.BaseModel):
     @pydantic.field_validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:
-        if not re.fullmatch(BACKEND_NAME_PATTERN, value):
-            raise ValueError(f"must match {BACKEND_NAME_PATTERN}")
+        if not re.fullmatch(_BACKEND_NAME_PATTERN, value):
+            raise ValueError(f"must match {_BACKEND_NAME_PATTERN}")
         return value
 
     @pydantic.field_validator("url")

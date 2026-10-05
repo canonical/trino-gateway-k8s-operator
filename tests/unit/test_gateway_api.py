@@ -93,7 +93,7 @@ def test_client_requests(monkeypatch: pytest.MonkeyPatch):
     assert json.loads(requests[1].data) == _entry("a", "http://a")
     assert requests[1].get_header("Content-type") == "application/json"
     assert requests[3].data == b"a"
-    assert all(c.kwargs["timeout"] == gateway_api.TIMEOUT_SECONDS for c in urlopen.call_args_list)
+    assert all(c.kwargs["timeout"] == gateway_api._TIMEOUT_SECONDS for c in urlopen.call_args_list)
 
 
 @pytest.mark.parametrize(

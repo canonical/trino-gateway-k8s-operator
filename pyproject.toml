@@ -69,8 +69,7 @@ filterwarnings = [
     "error",
     "ignore:unclosed file .*:ResourceWarning",
     "ignore:Exception ignored while finalizing file.*:pytest.PytestUnraisableExceptionWarning",
-    # Raised by the vendored data_platform_libs.data_interfaces v0 library.
-    "ignore:JujuVersion.from_environ\\(\\) is deprecated:DeprecationWarning",
+    "ignore:JujuVersion.from_environ\\(\\) is deprecated:DeprecationWarning:charms\\.data_platform_libs\\.v0\\.data_interfaces",
 ]
 
 # Linting tools configuration

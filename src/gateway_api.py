@@ -11,11 +11,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from config import BackendConfig
-from workload import DEFAULT_ROUTING_GROUP
+from constants import DEFAULT_ROUTING_GROUP
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_SECONDS = 5
+_TIMEOUT_SECONDS = 5
 
 
 class GatewayApiError(Exception):
@@ -64,7 +64,7 @@ class GatewayApiClient:
             request.add_header("Content-Type", content_type)
         try:
             # The base URL is a fixed http URL chosen by the charm, not user input.
-            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # nosec B310
+            with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # nosec B310
                 return response.read()
         except OSError as e:
             raise GatewayApiError(f"{method} {path} failed: {e}") from e

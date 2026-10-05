@@ -2,11 +2,13 @@
 # See LICENSE file for licensing details.
 
 import json
+import textwrap
 import time
 import urllib.error
 import urllib.request
 
 import jubilant
+import pytest
 import trino
 
 APP = "trino-gateway-k8s"
@@ -66,54 +68,58 @@ def _query_through_gateway(juju: jubilant.Juju, query: str, timeout: float = 600
             conn.close()
 
 
-def test_deploy(charm_path: str, resource_images: dict[str, str], juju: jubilant.Juju):
-    juju.model_config({"update-status-hook-interval": "30s"})
-    juju.deploy(charm_path, app=APP, resources=resource_images)
-    juju.deploy(POSTGRESQL, channel="14/stable", trust=True)
-    juju.deploy(TRINO, channel="latest/stable", trust=True)
-    juju.integrate(APP, POSTGRESQL)
-    status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
+@pytest.mark.incremental
+class TestBackends:
+    def test_deploy(self, charm_path: str, resource_images: dict[str, str], juju: jubilant.Juju):
+        juju.model_config({"update-status-hook-interval": "30s"})
+        juju.deploy(charm_path, app=APP, resources=resource_images)
+        juju.deploy(POSTGRESQL, channel="14/stable", trust=True)
+        juju.deploy(TRINO, channel="latest/stable", trust=True)
+        juju.integrate(APP, POSTGRESQL)
+        status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
-    assert status.apps[APP].units[UNIT].workload_status.message == "no backends configured"
+        assert status.apps[APP].units[UNIT].workload_status.message == "no backends configured"
 
+    def test_configured_backend_is_registered(self, juju: jubilant.Juju):
+        url = _trino_url(juju)
+        backends = textwrap.dedent(
+            f"""\
+            - name: {BACKEND}
+              url: {url}
+            """
+        )
+        juju.config(APP, {"backends": backends})
+        juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
-def test_configured_backend_is_registered(juju: jubilant.Juju):
-    url = _trino_url(juju)
-    juju.config(APP, {"backends": f"- name: {BACKEND}\n  url: {url}\n"})
-    juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
+        _wait_for_backends(
+            juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
+        )
 
-    _wait_for_backends(
-        juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
-    )
+    def test_query_through_gateway_service(self, juju: jubilant.Juju):
+        rows = _query_through_gateway(juju, "SELECT node_id FROM system.runtime.nodes")
 
+        assert rows
 
-def test_query_through_gateway_service(juju: jubilant.Juju):
-    rows = _query_through_gateway(juju, "SELECT node_id FROM system.runtime.nodes")
+    def test_backend_added_outside_charm_is_removed(self, juju: jubilant.Juju):
+        url = _trino_url(juju)
+        _gateway_request(
+            juju,
+            "/gateway/backend/modify/add",
+            {
+                "name": "manual",
+                "proxyTo": "http://manual:8080",
+                "active": True,
+                "routingGroup": "adhoc",
+            },
+        )
 
-    assert rows
+        _wait_for_backends(
+            juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
+        )
 
+    def test_removed_backend_is_deregistered(self, juju: jubilant.Juju):
+        juju.config(APP, reset="backends")
+        status = juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
-def test_backend_added_outside_charm_is_removed(juju: jubilant.Juju):
-    url = _trino_url(juju)
-    _gateway_request(
-        juju,
-        "/gateway/backend/modify/add",
-        {
-            "name": "manual",
-            "proxyTo": "http://manual:8080",
-            "active": True,
-            "routingGroup": "adhoc",
-        },
-    )
-
-    _wait_for_backends(
-        juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
-    )
-
-
-def test_removed_backend_is_deregistered(juju: jubilant.Juju):
-    juju.config(APP, reset="backends")
-    status = juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
-
-    assert status.apps[APP].units[UNIT].workload_status.message == "no backends configured"
-    _wait_for_backends(juju, [])
+        assert status.apps[APP].units[UNIT].workload_status.message == "no backends configured"
+        _wait_for_backends(juju, [])

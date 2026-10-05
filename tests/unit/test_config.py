@@ -1,6 +1,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import textwrap
+
 import pydantic
 import pytest
 
@@ -13,12 +15,14 @@ def test_empty_backends(raw: str):
 
 
 def test_parses_backends_and_strips_trailing_slash():
-    raw = """
-    - name: trino-a
-      url: http://trino-a.example:8080/
-    - name: trino_b.2
-      url: https://trino-b.example
-    """
+    raw = textwrap.dedent(
+        """\
+        - name: trino-a
+          url: http://trino-a.example:8080/
+        - name: trino_b.2
+          url: https://trino-b.example
+        """
+    )
 
     assert CharmConfig(backends=raw).backends == [  # type: ignore[arg-type]
         BackendConfig(name="trino-a", url="http://trino-a.example:8080"),
@@ -44,7 +48,12 @@ def test_parses_backends_and_strips_trailing_slash():
         ("- {name: a, url: 'http://a#x'}", "[0].url: must not have a path"),
         ("- {name: a, url: 'http://u:p@a'}", "[0].url: must not have a path"),
         (
-            "- {name: a, url: 'http://a'}\n- {name: a, url: 'http://b'}",
+            textwrap.dedent(
+                """\
+                - {name: a, url: 'http://a'}
+                - {name: a, url: 'http://b'}
+                """
+            ),
             "duplicate names: a",
         ),
     ],

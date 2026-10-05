@@ -10,8 +10,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+import constants
 from config import BackendConfig
-from constants import DEFAULT_ROUTING_GROUP
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def to_entry(backend: BackendConfig) -> dict[str, Any]:
         "name": backend.name,
         "proxyTo": backend.url,
         "active": True,
-        "routingGroup": DEFAULT_ROUTING_GROUP,
+        "routingGroup": constants.DEFAULT_ROUTING_GROUP,
         "externalUrl": backend.url,
     }
 

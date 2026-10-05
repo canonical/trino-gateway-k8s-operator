@@ -12,13 +12,7 @@ import ops
 import pydantic
 import yaml
 
-from constants import (
-    CONFIG_PATH,
-    DEFAULT_ROUTING_GROUP,
-    HTTP_PORT,
-    SERVICE_NAME,
-    WORKLOAD_USER,
-)
+import constants
 
 
 class PostgresRelationModel(pydantic.BaseModel):
@@ -73,7 +67,7 @@ def render_config(pg: PostgresRelationModel) -> str:
     config = {
         "serverConfig": {
             "node.environment": "production",
-            "http-server.http.port": HTTP_PORT,
+            "http-server.http.port": constants.HTTP_PORT,
         },
         "dataStore": {
             "jdbcUrl": f"jdbc:postgresql://{pg.endpoints}/{pg.database}",
@@ -82,7 +76,7 @@ def render_config(pg: PostgresRelationModel) -> str:
             "driver": "org.postgresql.Driver",
         },
         "clusterStatsConfiguration": {"monitorType": "INFO_API"},
-        "routing": {"defaultRoutingGroup": DEFAULT_ROUTING_GROUP},
+        "routing": {"defaultRoutingGroup": constants.DEFAULT_ROUTING_GROUP},
     }
     return yaml.safe_dump(config, sort_keys=False)
 
@@ -99,7 +93,7 @@ def pebble_layer(config_hash: str) -> ops.pebble.LayerDict:
     return {
         "summary": "Trino Gateway layer",
         "services": {
-            SERVICE_NAME: {
+            constants.SERVICE_NAME: {
                 "override": "merge",
                 # Pebble restarts the service on replan only when its definition changes.
                 "environment": {"CONFIG_HASH": config_hash},
@@ -116,15 +110,15 @@ def apply(container: ops.Container, config_text: str) -> None:
         config_text: The rendered configuration file content.
     """
     container.push(
-        CONFIG_PATH,
+        constants.CONFIG_PATH,
         config_text,
-        user=WORKLOAD_USER,
-        group=WORKLOAD_USER,
+        user=constants.WORKLOAD_USER,
+        group=constants.WORKLOAD_USER,
         permissions=0o600,
         make_dirs=True,
     )
     config_hash = hashlib.sha256(config_text.encode()).hexdigest()
-    container.add_layer(SERVICE_NAME, pebble_layer(config_hash), combine=True)
+    container.add_layer(constants.SERVICE_NAME, pebble_layer(config_hash), combine=True)
     container.replan()
 
 
@@ -138,6 +132,6 @@ def is_running(container: ops.Container) -> bool:
         True if the Pebble service is active.
     """
     try:
-        return container.get_service(SERVICE_NAME).is_running()
+        return container.get_service(constants.SERVICE_NAME).is_running()
     except ops.ModelError:
         return False

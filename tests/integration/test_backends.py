@@ -82,12 +82,10 @@ class TestBackends:
 
     def test_configured_backend_is_registered(self, juju: jubilant.Juju):
         url = _trino_url(juju)
-        backends = textwrap.dedent(
-            f"""\
+        backends = textwrap.dedent(f"""\
             - name: {BACKEND}
               url: {url}
-            """
-        )
+        """)
         juju.config(APP, {"backends": backends})
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 

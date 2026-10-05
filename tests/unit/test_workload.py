@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import yaml
 
+import constants
 import workload
-from constants import CONFIG_PATH
 from workload import PostgresRelationModel
 
 PG = PostgresRelationModel.model_validate(
@@ -45,7 +45,7 @@ def test_apply_pushes_private_config_and_replans():
     workload.apply(container, "config")
 
     container.push.assert_called_once_with(
-        CONFIG_PATH,
+        constants.CONFIG_PATH,
         "config",
         user="_daemon_",
         group="_daemon_",

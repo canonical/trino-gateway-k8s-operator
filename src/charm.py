@@ -10,10 +10,10 @@ import ops
 import pydantic
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 
+import constants
 import gateway_api
 import workload
 from config import CharmConfig, describe_error
-from constants import CONTAINER_NAME, DATABASE_NAME, HTTP_PORT, POSTGRESQL_RELATION
 from gateway_api import GatewayApiClient, GatewayApiError
 from workload import PostgresRelationModel
 
@@ -25,18 +25,20 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
-        self._container = self.unit.get_container(CONTAINER_NAME)
-        self._postgresql = DatabaseRequires(self, POSTGRESQL_RELATION, database_name=DATABASE_NAME)
+        self._container = self.unit.get_container(constants.CONTAINER_NAME)
+        self._postgresql = DatabaseRequires(
+            self, constants.POSTGRESQL_RELATION, database_name=constants.DATABASE_NAME
+        )
 
         for event in (
-            self.on[CONTAINER_NAME].pebble_ready,
+            self.on[constants.CONTAINER_NAME].pebble_ready,
             self.on.config_changed,
             self.on.upgrade_charm,
             self.on.update_status,
             self.on.leader_elected,
             self.on.secret_changed,
-            self.on[POSTGRESQL_RELATION].relation_changed,
-            self.on[POSTGRESQL_RELATION].relation_broken,
+            self.on[constants.POSTGRESQL_RELATION].relation_changed,
+            self.on[constants.POSTGRESQL_RELATION].relation_broken,
         ):
             framework.observe(event, self._reconcile)
         framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
@@ -52,7 +54,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             return
 
         workload.apply(self._container, workload.render_config(pg))
-        self.unit.set_ports(HTTP_PORT)
+        self.unit.set_ports(constants.HTTP_PORT)
 
         if not self.unit.is_leader():
             return
@@ -62,7 +64,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             return
         try:
             gateway_api.sync_backends(
-                GatewayApiClient(f"http://localhost:{HTTP_PORT}"), config.backends
+                GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}"), config.backends
             )
         except GatewayApiError as e:
             # The gateway may still be starting after a restart; a later hook converges.
@@ -73,9 +75,9 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         if not self._container.can_connect():
             event.add_status(ops.MaintenanceStatus("waiting for Pebble"))
 
-        if self.model.get_relation(POSTGRESQL_RELATION) is None:
+        if self.model.get_relation(constants.POSTGRESQL_RELATION) is None:
             event.add_status(
-                ops.BlockedStatus(f"missing required relation: {POSTGRESQL_RELATION}")
+                ops.BlockedStatus(f"missing required relation: {constants.POSTGRESQL_RELATION}")
             )
         elif self._load_postgresql() is None:
             event.add_status(ops.WaitingStatus("waiting for postgresql database"))
@@ -91,7 +93,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
 
     def _load_postgresql(self) -> PostgresRelationModel | None:
         """Load the PostgreSQL relation data, or None if it is absent or incomplete."""
-        relation = self.model.get_relation(POSTGRESQL_RELATION)
+        relation = self.model.get_relation(constants.POSTGRESQL_RELATION)
         if relation is None:
             return None
         try:

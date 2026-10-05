@@ -42,7 +42,7 @@ application.
 | `application` | The full `juju_application` resource. |
 | `offers` | Map keyed by offered endpoint: `{ kind = "offer", url = <offer URL> }`. Empty while the charm provides no endpoints. |
 | `provides` | Map of provided endpoint objects. Empty while the charm declares no provided endpoints. |
-| `requires` | Map of required endpoint objects. Empty while the charm declares no required endpoints. |
+| `requires` | Map of required endpoint objects, keyed by endpoint: `postgresql` (`postgresql_client` interface). |
 
 ## Resource overrides
 

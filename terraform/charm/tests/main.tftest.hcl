@@ -29,8 +29,26 @@ run "basic_deploy" {
   }
 
   assert {
-    condition     = length(output.provides) == 0 && length(output.requires) == 0
-    error_message = "Trino Gateway should not report undeclared relation endpoints"
+    condition     = length(output.provides) == 0
+    error_message = "Trino Gateway should not report undeclared provided endpoints"
+  }
+}
+
+run "postgresql_requirement" {
+  command = plan
+
+  variables {
+    model_uuid = run.setup.model_uuid
+  }
+
+  assert {
+    condition     = keys(output.requires) == ["postgresql"]
+    error_message = "Trino Gateway should only require the postgresql endpoint"
+  }
+
+  assert {
+    condition     = output.requires.postgresql.endpoint == "postgresql" && output.requires.postgresql.name == "trino-gateway-k8s"
+    error_message = "postgresql requirement did not reference the application endpoint"
   }
 }
 

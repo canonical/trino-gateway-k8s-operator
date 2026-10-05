@@ -33,6 +33,16 @@ parts:
     build-snaps:
       - astral-uv
 
+charm-libs:
+  - lib: data_platform_libs.data_interfaces
+    version: "0"
+
+requires:
+  postgresql:
+    interface: postgresql_client
+    limit: 1
+    optional: false
+
 containers:
   trino-gateway:
     resource: trino-gateway-image

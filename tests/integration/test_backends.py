@@ -74,7 +74,7 @@ class TestBackends:
         juju.model_config({"update-status-hook-interval": "30s"})
         juju.deploy(charm_path, app=APP, resources=resource_images)
         juju.deploy(POSTGRESQL, channel="14/stable", trust=True)
-        juju.deploy(TRINO, channel="latest/stable", trust=True)
+        juju.deploy(TRINO, channel="latest/edge", trust=True, config={"charm-function": "all"})
         juju.integrate(APP, POSTGRESQL)
         status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 

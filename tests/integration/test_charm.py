@@ -18,9 +18,16 @@ BLOCKED_MESSAGE = "missing required relation: postgresql"
 PEBBLE = "PEBBLE_SOCKET=/charm/containers/trino-gateway/pebble.socket /charm/bin/pebble"
 
 
-def _service_state(juju: jubilant.Juju) -> str:
-    output = juju.ssh(UNIT, f"{PEBBLE} services trino-gateway")
-    return output.splitlines()[1].split()[2]
+def _service_state(juju: jubilant.Juju, timeout: float = 120) -> str:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            output = juju.ssh(UNIT, f"{PEBBLE} services trino-gateway")
+            return output.splitlines()[1].split()[2]
+        except (jubilant.CLIError, IndexError):
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(5)
 
 
 def _relation_user(juju: jubilant.Juju) -> dict[str, str]:

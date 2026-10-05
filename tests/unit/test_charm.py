@@ -1,14 +1,19 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from unittest.mock import MagicMock
+
 import ops
 import pytest
 from ops import testing
 
+import gateway_api
 import workload
 from charm import TrinoGatewayK8SOperatorCharm
+from config import BackendConfig
 
 USER = {"username": "gateway", "password": "s3cr3t-pw"}
+BACKENDS = "- name: trino-a\n  url: http://trino-a:8080\n"
 ROCK_LAYER = ops.pebble.Layer(
     {
         "services": {
@@ -111,7 +116,7 @@ def test_relation_ready_starts_gateway(ctx: testing.Context):
 
     state_out = ctx.run(ctx.on.relation_changed(relation), state)
 
-    assert state_out.unit_status == testing.ActiveStatus()
+    assert state_out.unit_status == testing.ActiveStatus("no backends configured")
     container_out = state_out.get_container(workload.SERVICE_NAME)
     assert container_out.service_statuses[workload.SERVICE_NAME] == ops.pebble.ServiceStatus.ACTIVE
     assert state_out.opened_ports == {testing.TCPPort(workload.HTTP_PORT)}
@@ -190,3 +195,63 @@ def test_config_hash_changes_on_new_endpoint(ctx: testing.Context):
     )
 
     assert _config_hash(before) != _config_hash(after)
+
+
+@pytest.fixture
+def sync_backends(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    mock = MagicMock()
+    monkeypatch.setattr(gateway_api, "sync_backends", mock)
+    return mock
+
+
+def _ready_state(leader: bool = True, backends: str = BACKENDS) -> testing.State:
+    secret = _secret()
+    return testing.State(
+        leader=leader,
+        config={"backends": backends},
+        containers={_container()},
+        relations={_relation(secret)},
+        secrets={secret},
+    )
+
+
+def test_leader_syncs_configured_backends(ctx: testing.Context, sync_backends: MagicMock):
+    state_out = ctx.run(ctx.on.config_changed(), _ready_state())
+
+    assert state_out.unit_status == testing.ActiveStatus()
+    sync_backends.assert_called_once()
+    assert sync_backends.call_args.args[1] == [
+        BackendConfig(name="trino-a", url="http://trino-a:8080")
+    ]
+
+
+def test_sync_errors_are_swallowed(ctx: testing.Context, sync_backends: MagicMock):
+    sync_backends.side_effect = gateway_api.GatewayApiError("connection refused")
+
+    state_out = ctx.run(ctx.on.update_status(), _ready_state())
+
+    assert state_out.unit_status == testing.ActiveStatus()
+
+
+def test_non_leader_does_not_sync(ctx: testing.Context, sync_backends: MagicMock):
+    ctx.run(ctx.on.config_changed(), _ready_state(leader=False))
+
+    sync_backends.assert_not_called()
+
+
+def test_invalid_backends_block_without_sync(ctx: testing.Context, sync_backends: MagicMock):
+    state_out = ctx.run(ctx.on.config_changed(), _ready_state(backends="- name: a"))
+
+    assert state_out.unit_status == testing.BlockedStatus(
+        "invalid backends config: [0].url: field required"
+    )
+    sync_backends.assert_not_called()
+    container_out = state_out.get_container(workload.SERVICE_NAME)
+    assert container_out.service_statuses[workload.SERVICE_NAME] == ops.pebble.ServiceStatus.ACTIVE
+
+
+def test_empty_backends_are_active(ctx: testing.Context, sync_backends: MagicMock):
+    state_out = ctx.run(ctx.on.config_changed(), _ready_state(backends=""))
+
+    assert state_out.unit_status == testing.ActiveStatus("no backends configured")
+    assert sync_backends.call_args.args[1] == []

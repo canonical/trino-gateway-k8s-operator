@@ -4,12 +4,19 @@
 
 """Charm for Trino Gateway on Kubernetes."""
 
+import logging
+
 import ops
 import pydantic
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 
+import gateway_api
 import workload
+from config import CharmConfig, describe_error
+from gateway_api import GatewayApiClient, GatewayApiError
 from workload import PostgresRelationModel
+
+logger = logging.getLogger(__name__)
 
 CONTAINER_NAME = "trino-gateway"
 POSTGRESQL_RELATION = "postgresql"
@@ -50,6 +57,20 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         workload.apply(self._container, workload.render_config(pg))
         self.unit.set_ports(workload.HTTP_PORT)
 
+        if not self.unit.is_leader():
+            return
+        try:
+            config = self.load_config(CharmConfig, errors="raise")
+        except pydantic.ValidationError:
+            return
+        try:
+            gateway_api.sync_backends(
+                GatewayApiClient(f"http://localhost:{workload.HTTP_PORT}"), config.backends
+            )
+        except GatewayApiError as e:
+            # The gateway may still be starting after a restart; a later hook converges.
+            logger.warning("Backend sync failed, retrying on a later hook: %s", e)
+
     def _on_collect_unit_status(self, event: ops.CollectStatusEvent) -> None:
         """Derive the unit status from observed state."""
         if not self._container.can_connect():
@@ -64,7 +85,12 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         elif self._container.can_connect() and not workload.is_running(self._container):
             event.add_status(ops.MaintenanceStatus("gateway service is not running"))
 
-        event.add_status(ops.ActiveStatus())
+        try:
+            config = self.load_config(CharmConfig, errors="raise")
+        except pydantic.ValidationError as e:
+            event.add_status(ops.BlockedStatus(f"invalid backends config: {describe_error(e)}"))
+            return
+        event.add_status(ops.ActiveStatus("" if config.backends else "no backends configured"))
 
     def _load_postgresql(self) -> PostgresRelationModel | None:
         """Load the PostgreSQL relation data, or None if it is absent or incomplete."""

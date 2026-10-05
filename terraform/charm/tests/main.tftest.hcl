@@ -52,6 +52,22 @@ run "postgresql_requirement" {
   }
 }
 
+run "backends_config" {
+  command = plan
+
+  variables {
+    model_uuid = run.setup.model_uuid
+    config = {
+      backends = "- name: trino-a\n  url: http://trino-k8s.trino.svc.cluster.local:8080\n"
+    }
+  }
+
+  assert {
+    condition     = output.application.config["backends"] == "- name: trino-a\n  url: http://trino-k8s.trino.svc.cluster.local:8080\n"
+    error_message = "backends config was not forwarded to the application"
+  }
+}
+
 run "resources_default" {
   command = plan
 

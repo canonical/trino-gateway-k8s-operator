@@ -26,12 +26,55 @@ port `8080`.
 Credential rotation and endpoint changes from PostgreSQL are applied automatically by
 restarting the gateway.
 
+## Configure Trino backends
+
+Register Trino clusters with the `backends` option, a YAML list of entries with a unique `name`
+and the `url` of the Trino coordinator:
+
+```shell
+juju config trino-gateway-k8s backends='
+- name: trino-a
+  url: http://trino-k8s.trino-model.svc.cluster.local:8080
+'
+```
+
+The charm keeps the gateway's registered backends identical to this list. Backends added,
+changed or removed through the gateway's API are reverted. All backends are placed in the
+`adhoc` routing group and checked with the gateway's default unauthenticated health check
+(`/v1/info`). An invalid value leaves the unit Blocked with a message pointing at the problem;
+an empty value is valid, and the unit reports `no backends configured`.
+
+Changes are applied by the leader unit on its next hook. After the gateway restarts, the backend
+list may only converge on the following `update-status` hook.
+
+## Connect a client
+
+Clients connect to the gateway's Kubernetes Service over HTTP, using their usual Trino
+credentials:
+
+```text
+http://trino-gateway-k8s.<model>.svc.cluster.local:8080
+```
+
+The gateway passes credentials through to the Trino cluster unchanged. Because the connection
+is plain HTTP, each Trino cluster must be configured to work behind a proxy:
+
+- `http-server.process-forwarded=true`, so that follow-up URLs point at the gateway rather than
+  the cluster.
+- `http-server.authentication.allow-insecure-over-http=true`, so that clients can authenticate
+  with a user name only. Trino accepts passwords over HTTP only when the forwarded protocol is
+  HTTPS, so password authentication through the gateway is not possible until TLS is supported.
+
+The `trino-k8s` charm sets both.
+
 ## Limitations
 
 - Only a single unit is supported.
-- There is no TLS and no ingress; the gateway is reachable over plain HTTP inside the cluster.
+- There is no TLS and no ingress; clients connect over plain HTTP to the in-cluster Service
+  address only.
 - The gateway's admin web UI and REST API are not authenticated. Anyone who can reach port
-  `8080` can change the gateway's state.
+  `8080` can change the gateway's state, although the charm reverts backend changes.
+- The charm owns the whole backend list and removes backends that are not in `backends`.
 - If the `postgresql` integration is removed, the unit becomes Blocked but the gateway keeps
   running, so clients get errors from the gateway rather than refused connections.
 

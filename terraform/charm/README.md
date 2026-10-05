@@ -23,7 +23,7 @@ application.
 | `app_name` | `string` | `"trino-gateway-k8s"` | No | Application name for the deployment. |
 | `base` | `string` | `null` | Yes | Operating system base passed to the charm block. |
 | `channel` | `string` | `"latest/edge"` | No | Charmhub channel to deploy from. |
-| `config` | `map(string)` | `{}` | No | Charm configuration options, passed unchanged. |
+| `config` | `map(string)` | `{}` | No | Charm configuration options, passed unchanged, such as `backends`. |
 | `constraints` | `string` | `null` | Yes | Juju deployment constraints. |
 | `endpoint_bindings` | `set(object({ space = string, endpoint = optional(string) }))` | `[]` | No | Network space bindings; omitted `endpoint` binds the application default. |
 | `expose` | `object({ cidrs = optional(string), endpoints = optional(string), spaces = optional(string) })` | `null` | Yes | `null` omits exposure; `{}` exposes all endpoints. |

@@ -30,3 +30,9 @@ integration-suites:
     pytest-arguments-template: |
       --juju-model testing
       --no-juju-teardown
+  trino_gateway_rock/tests/integration/:
+    summary: trino-gateway rock integration tests
+    working-dir: trino_gateway_rock/
+    auto-discover: true
+    backends:
+      - integration-test

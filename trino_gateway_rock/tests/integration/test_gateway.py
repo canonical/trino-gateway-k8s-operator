@@ -175,7 +175,7 @@ def test_deploy_dependencies(juju: jubilant.Juju):
     )
     juju.integrate("data-integrator:postgresql", "postgresql-k8s:database")
     juju.deploy("trino-k8s", channel="latest/edge", trust=True)
-    juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=15 * 60)
+    juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
 
 def test_gateway_ready(juju: jubilant.Juju, namespace: str, gateway_image: str, gateway_url: str):

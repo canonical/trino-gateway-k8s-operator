@@ -27,4 +27,5 @@ header:
     - 'uv.lock'
     - 'apm.lock.yaml'
     - '**/keyring_broker.py'
+    - 'lib/charms/data_platform_libs/**'
   comment: on-failure

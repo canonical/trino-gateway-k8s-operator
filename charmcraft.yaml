@@ -33,6 +33,33 @@ parts:
     build-snaps:
       - astral-uv
 
+charm-libs:
+  - lib: data_platform_libs.data_interfaces
+    version: "0"
+
+requires:
+  postgresql:
+    interface: postgresql_client
+    limit: 1
+    optional: false
+
+config:
+  options:
+    backends:
+      type: string
+      default: ""
+      description: |
+        Trino clusters to register with the gateway, as a YAML list. Each entry has a unique
+        `name` (letters, digits, `_`, `.` or `-`, at most 63 characters) and the `url` of the
+        Trino coordinator, with no path. For example:
+
+          - name: trino-a
+            url: http://trino-k8s.trino-model.svc.cluster.local:8080
+
+        The charm owns the gateway's backend list: backends added through the gateway API
+        are removed, and backends removed from this list are deregistered. All backends are
+        placed in the `adhoc` routing group.
+
 containers:
   trino-gateway:
     resource: trino-gateway-image

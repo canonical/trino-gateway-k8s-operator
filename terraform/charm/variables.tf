@@ -28,7 +28,7 @@ variable "channel" {
 }
 
 variable "config" {
-  description = "Charm configuration options passed to the application unchanged."
+  description = "Charm configuration options passed to the application unchanged, such as `backends` (a YAML list of Trino clusters)."
   type        = map(string)
   default     = {}
   nullable    = false

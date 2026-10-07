@@ -6,5 +6,7 @@ locals {
   expose_blocks = var.expose == null ? [] : [var.expose]
 
   provided_endpoints = {}
-  required_endpoints = {}
+  required_endpoints = {
+    postgresql = "postgresql"
+  }
 }

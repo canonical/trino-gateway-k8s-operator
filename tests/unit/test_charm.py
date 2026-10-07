@@ -114,6 +114,21 @@ def test_relation_with_unreadable_secret_waits(ctx: testing.Context):
     assert state_out.unit_status == testing.WaitingStatus("waiting for postgresql database")
 
 
+def test_relation_with_ungranted_secret_waits(ctx: testing.Context, monkeypatch):
+    secret = _secret()
+    state = testing.State(
+        containers={_container()}, relations={_relation(secret)}, secrets={secret}
+    )
+
+    def deny(*args, **kwargs):
+        raise ops.ModelError("permission denied")
+
+    monkeypatch.setattr(ops.Model, "get_secret", deny)
+    state_out = ctx.run(ctx.on.update_status(), state)
+
+    assert state_out.unit_status == testing.WaitingStatus("waiting for postgresql database")
+
+
 def test_relation_ready_starts_gateway(ctx: testing.Context):
     secret = _secret()
     relation = _relation(secret)

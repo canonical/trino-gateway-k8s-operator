@@ -37,7 +37,8 @@ def _wait_for_backends(juju: jubilant.Juju, expected: list[dict], timeout: float
     """Poll the gateway until its backends match; the charm syncs on its next hook."""
     keys = ("name", "proxyTo", "active", "routingGroup")
     deadline = time.monotonic() + timeout
-    while True:
+    current = None
+    while time.monotonic() < deadline:
         try:
             backends = json.loads(_gateway_request(juju, "/gateway/backend/all"))
             current = sorted(({k: b.get(k) for k in keys} for b in backends), key=str)
@@ -45,27 +46,27 @@ def _wait_for_backends(juju: jubilant.Juju, expected: list[dict], timeout: float
             current = None
         if current == sorted(({k: b[k] for k in keys} for b in expected), key=str):
             return
-        if time.monotonic() > deadline:
-            raise AssertionError(f"gateway backends {current} never matched {expected}")
         time.sleep(10)
+    raise AssertionError(f"gateway backends {current} never matched {expected}")
 
 
 def _query_through_gateway(juju: jubilant.Juju, query: str, timeout: float = 600) -> list:
     """Query through the gateway Service, retrying until the backend is reported healthy."""
     address = juju.status().apps[APP].address
     deadline = time.monotonic() + timeout
-    while True:
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
         conn = trino.dbapi.connect(host=address, port=8080, user="trino", http_scheme="http")
         try:
             cursor = conn.cursor()
             cursor.execute(query)
             return cursor.fetchall()
-        except (trino.exceptions.Error, trino.exceptions.HttpError):
-            if time.monotonic() > deadline:
-                raise
+        except (trino.exceptions.Error, trino.exceptions.HttpError) as e:
+            last_error = e
             time.sleep(10)
         finally:
             conn.close()
+    raise AssertionError(f"query {query!r} never succeeded through the gateway") from last_error
 
 
 @pytest.mark.incremental

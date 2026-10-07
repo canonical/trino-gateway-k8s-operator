@@ -21,7 +21,10 @@ PG = PostgresRelationModel.model_validate(
 
 def test_render_config():
     assert yaml.safe_load(workload.render_config(PG)) == {
-        "serverConfig": {"node.environment": "production", "http-server.http.port": 8080},
+        "serverConfig": {
+            "node.environment": constants.NODE_ENVIRONMENT,
+            "http-server.http.port": 8080,
+        },
         "dataStore": {
             "jdbcUrl": "jdbc:postgresql://pg-0:5432/trino_gateway",
             "user": "gateway",

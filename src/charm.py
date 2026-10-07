@@ -102,7 +102,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
                 relation.app,
                 decoder=PostgresRelationModel.decode(self),
             )
-        except (pydantic.ValidationError, ops.SecretNotFoundError):
+        except (pydantic.ValidationError, ops.ModelError):
             return None
 
 

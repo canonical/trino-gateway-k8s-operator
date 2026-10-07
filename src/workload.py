@@ -66,7 +66,7 @@ def render_config(pg: PostgresRelationModel) -> str:
     """
     config = {
         "serverConfig": {
-            "node.environment": "production",
+            "node.environment": constants.NODE_ENVIRONMENT,
             "http-server.http.port": constants.HTTP_PORT,
         },
         "dataStore": {

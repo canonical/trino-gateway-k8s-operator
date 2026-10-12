@@ -7,6 +7,7 @@ locals {
 
   provided_endpoints = {}
   required_endpoints = {
-    postgresql = "postgresql"
+    backend_trino_catalog = "backend-trino-catalog"
+    postgresql            = "postgresql"
   }
 }

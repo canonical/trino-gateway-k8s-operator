@@ -66,8 +66,8 @@ juju integrate trino-gateway-k8s:backend-trino-catalog trino-a:trino-catalog
 ```
 
 - The backend is named after the related application, which for an offer is the name given to
-  `juju consume`. A name that is not a valid backend name, for example one longer than 63
-  characters, is shortened and given a hash suffix.
+  `juju consume`. A name longer than 63 characters is shortened and given a hash suffix. If a name is still not a valid backend name, the relation adds no backend and
+  is reported as not ready.
 - If a related application has the same name as a backend in `backends`, the unit is Blocked
   with `backend name conflict: <names>` and the backend list is left unchanged. Rename the
   configured backend, or consume the offer under another alias.

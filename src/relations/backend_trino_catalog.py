@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 
 import ops
-from charms.trino_k8s.v0.trino_catalog import TrinoCatalogRequirer
+from charms.trino_k8s.v0.trino_catalog import TrinoCatalog, TrinoCatalogRequirer
 
 import constants
 from config import BackendConfig
@@ -63,8 +63,8 @@ def backend_name(app_name: str) -> str:
         app_name: Name of the remote application.
 
     Returns:
-        The name itself, or a shortened name with a hash suffix if it is not a valid backend
-        name.
+        The name itself if it is a valid backend name, otherwise its first 54 characters followed
+        by a hash of the full name.
     """
     if re.fullmatch(constants.BACKEND_NAME_PATTERN, app_name):
         return app_name
@@ -93,6 +93,24 @@ def backend_url(trino_url: str) -> str:
     return f"{scheme}://{host}:{port}"
 
 
+def _catalog_names(catalogs: list[TrinoCatalog]) -> tuple[str, ...]:
+    """Collect the sorted names of the advertised catalogs.
+
+    Args:
+        catalogs: The catalogs advertised by the remote application.
+
+    Returns:
+        The catalog names in sorted order.
+
+    Raises:
+        ValueError: if a catalog name is not a string.
+    """
+    names = [catalog.name for catalog in catalogs]
+    if not all(isinstance(name, str) for name in names):
+        raise ValueError("catalog names must be strings")
+    return tuple(sorted(names))
+
+
 def load(requirer: TrinoCatalogRequirer, relations: list[ops.Relation]) -> RelatedBackends:
     """Read the related Trino applications as validated backends.
 
@@ -115,6 +133,7 @@ def load(requirer: TrinoCatalogRequirer, relations: list[ops.Relation]) -> Relat
             validated = BackendConfig(
                 name=backend_name(remote_app), url=backend_url(info["trino_url"])
             )
+            catalogs = _catalog_names(info["trino_catalogs"])
         except ValueError as e:
             logger.warning(
                 "Skipping backend-trino-catalog relation %r (%r): %r", relation_id, remote_app, e
@@ -125,7 +144,7 @@ def load(requirer: TrinoCatalogRequirer, relations: list[ops.Relation]) -> Relat
             RelatedBackend(
                 name=validated.name,
                 url=validated.url,
-                catalogs=tuple(sorted(catalog.name for catalog in info["trino_catalogs"])),
+                catalogs=catalogs,
                 relation_id=relation_id,
                 remote_app=remote_app,
             )

@@ -407,6 +407,19 @@ def test_malformed_relations_are_counted(ctx: testing.Context, sync_backends: Ma
     assert [b.name for b in sync_backends.call_args.args[1]] == ["trino-a"]
 
 
+def test_non_string_catalog_names_are_counted(ctx: testing.Context, sync_backends: MagicMock):
+    """A relation with a non-string catalog name is not ready and does not fail the hook."""
+    catalogs = json.dumps([{"name": None}, {"name": "hive"}])
+    relation = _trino_relation("trino-c", trino_catalogs=catalogs)
+
+    state_out = ctx.run(ctx.on.config_changed(), _state_with(relation))
+
+    assert state_out.unit_status == testing.ActiveStatus(
+        "1 backend-trino-catalog relation not ready"
+    )
+    assert [b.name for b in sync_backends.call_args.args[1]] == ["trino-a"]
+
+
 def test_relation_created_publishes_app_name(ctx: testing.Context, sync_backends: MagicMock):
     """The leader publishes its application name for the Trino provider to use."""
     relation = testing.Relation(constants.BACKEND_TRINO_CATALOG_RELATION)

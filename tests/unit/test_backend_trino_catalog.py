@@ -146,6 +146,17 @@ def test_load_skips_name_that_stays_invalid_after_shortening(caplog: pytest.LogC
     assert "'bad name!'" in caplog.text
 
 
+def test_load_skips_relation_with_non_string_catalog_names(caplog: pytest.LogCaptureFixture):
+    """A relation advertising a non-string catalog name is logged and skipped, not raised on."""
+    caplog.set_level(logging.WARNING)
+
+    result, _ = _load([_info(1, "trino-a", catalogs=(None, "hive")), _info(2, "trino-b")])
+
+    assert [backend.name for backend in result.backends] == ["trino-b"]
+    assert result.skipped == 1
+    assert "'trino-a'" in caplog.text
+
+
 def test_load_never_reads_credentials(caplog: pytest.LogCaptureFixture):
     """Neither the credentials accessors nor the secret ID are ever used."""
     caplog.set_level(logging.DEBUG)

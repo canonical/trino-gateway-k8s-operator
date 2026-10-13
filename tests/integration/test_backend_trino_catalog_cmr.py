@@ -111,7 +111,8 @@ class TestBackendTrinoCatalogCrossModel:
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
         wait_for_backends(juju, [_backend(ALIAS, CONFIGURED)])
 
-        juju.cli("remove-saas", ALIAS, "--force")
+        juju.cli("remove-saas", ALIAS)
+        juju.wait(lambda s: ALIAS not in s.app_endpoints, error=jubilant.any_error)
         _consume(juju, trino_juju, OTHER_ALIAS)
         juju.integrate(GATEWAY_ENDPOINT, f"{OTHER_ALIAS}:{CATALOG_ENDPOINT}")
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)

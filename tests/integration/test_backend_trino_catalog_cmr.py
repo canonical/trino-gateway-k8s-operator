@@ -47,7 +47,7 @@ def trino_juju(juju_factory) -> jubilant.Juju:
 
 @pytest.mark.incremental
 class TestBackendTrinoCatalogCrossModel:
-    """A Trino application related across models is registered under its alias."""
+    """Trino applications related across models are registered under their consumed alias."""
 
     def test_deploy(
         self,
@@ -56,14 +56,15 @@ class TestBackendTrinoCatalogCrossModel:
         juju: jubilant.Juju,
         trino_juju: jubilant.Juju,
     ):
-        """The gateway and PostgreSQL deploy in one model and Trino in another."""
+        """The gateway, PostgreSQL and a Trino deploy in one model and another Trino in another."""
         juju.model_config({"update-status-hook-interval": "30s"})
         juju.deploy(charm_path, app=APP, resources=resource_images)
         juju.deploy(POSTGRESQL, channel="14/stable", trust=True, config={"profile": "testing"})
         juju.integrate(APP, POSTGRESQL)
-        trino_juju.deploy(
-            TRINO, channel="latest/edge", trust=True, config={"charm-function": "all"}
-        )
+        for model in (juju, trino_juju):
+            model.deploy(
+                TRINO, channel="latest/edge", trust=True, config={"charm-function": "all"}
+            )
         trino_juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
         status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
@@ -117,4 +118,22 @@ class TestBackendTrinoCatalogCrossModel:
 
         wait_for_backends(
             juju, [_backend(ALIAS, CONFIGURED), _trino_backend(trino_juju, OTHER_ALIAS)]
+        )
+
+    def test_local_and_remote_applications_with_the_same_name_coexist(
+        self, juju: jubilant.Juju, trino_juju: jubilant.Juju
+    ):
+        """Juju requires an alias for a consumed offer named like a local application."""
+        with pytest.raises(jubilant.CLIError):
+            _consume(juju, trino_juju, TRINO)
+        juju.integrate(GATEWAY_ENDPOINT, f"{TRINO}:{CATALOG_ENDPOINT}")
+        juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
+
+        wait_for_backends(
+            juju,
+            [
+                _backend(ALIAS, CONFIGURED),
+                _trino_backend(trino_juju, OTHER_ALIAS),
+                _trino_backend(juju, TRINO),
+            ],
         )

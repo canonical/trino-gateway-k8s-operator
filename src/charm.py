@@ -79,7 +79,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         except pydantic.ValidationError:
             return
         try:
-            desired, _ = self._load_backends(config)
+            desired, _ = self._load_backends(config)  # pyright: ignore[reportAssignmentType]
         except BackendNameConflictError as e:
             logger.error("Backend sync stopped: %s", e)
             return

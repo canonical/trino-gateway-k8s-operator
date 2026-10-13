@@ -108,7 +108,13 @@ class TestBackendTrinoCatalogCrossModel:
     ):
         """Consuming the offer under another alias leaves the configured backend untouched."""
         juju.remove_relation(GATEWAY_ENDPOINT, f"{ALIAS}:{CATALOG_ENDPOINT}")
-        juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
+        juju.wait(
+            lambda s: jubilant.all_active(s, APP) and not s.app_endpoints[ALIAS].relations,
+            error=jubilant.any_error,
+        )
+        trino_juju.wait(
+            lambda s: CATALOG_ENDPOINT not in s.apps[TRINO].relations, error=jubilant.any_error
+        )
         wait_for_backends(juju, [_backend(ALIAS, CONFIGURED)])
 
         juju.cli("remove-saas", ALIAS)

@@ -16,7 +16,7 @@ NO_BACKENDS = "no backends configured or related"
 # The application, offer and alias differ so the test shows which one names the backend.
 OFFER = "trino-offer"
 ALIAS = "trino-remote"
-OTHER_ALIAS = "trino-remote-2"
+OTHER_ALIAS = "trino-other"
 CONFIGURED = "http://configured:8080"
 FETCH_SCRIPT = (
     "import sys, urllib.request; "

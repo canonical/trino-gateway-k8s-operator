@@ -42,10 +42,43 @@ The charm keeps the gateway's registered backends identical to this list. Backen
 changed or removed through the gateway's API are reverted. All backends are placed in the
 `adhoc` routing group and checked with the gateway's default unauthenticated health check
 (`/v1/info`). An invalid value leaves the unit Blocked with a message pointing at the problem;
-an empty value is valid, and the unit reports `no backends configured`.
+an empty value is valid, and with no related Trino applications either, the unit reports
+`no backends configured or related`.
 
 Changes are applied by the leader unit on its next hook. After the gateway restarts, the backend
 list may only converge on the following `update-status` hook.
+
+## Relate Trino applications
+
+Trino applications that provide the `trino_catalog` interface are registered as backends in
+addition to the `backends` option:
+
+```shell
+juju integrate trino-gateway-k8s:backend-trino-catalog trino-k8s:trino-catalog
+```
+
+For a Trino application in another model, consume its offer and integrate with the resulting
+application:
+
+```shell
+juju consume trino-model.trino-k8s trino-a
+juju integrate trino-gateway-k8s:backend-trino-catalog trino-a:trino-catalog
+```
+
+- The backend is named after the related application, which for an offer is the name given to
+  `juju consume`. A name longer than 63 characters is shortened and given a hash suffix. If a name is still not a valid backend name, the relation adds no backend and
+  is reported as not ready.
+- If a related application has the same name as a backend in `backends`, the unit is Blocked
+  with `backend name conflict: <names>` and the backend list is left unchanged. Rename the
+  configured backend, or consume the offer under another alias.
+- The backend URL is inferred from the address the Trino application advertises: HTTPS when the
+  port is `443`, HTTP otherwise.
+- A relation whose data is missing or malformed adds no backend and does not block the unit. The
+  Active message reports how many relations are not ready, and the reason is in the logs.
+- The gateway can only reach a Trino application in another Kubernetes cluster if that
+  application is exposed through ingress; otherwise it advertises an in-cluster address and the
+  backend is registered but unhealthy.
+- The credentials in the relation are not used.
 
 ## Connect a client
 
@@ -74,7 +107,8 @@ The `trino-k8s` charm sets both.
   address only.
 - The gateway's admin web UI and REST API are not authenticated. Anyone who can reach port
   `8080` can change the gateway's state, although the charm reverts backend changes.
-- The charm owns the whole backend list and removes backends that are not in `backends`.
+- The charm owns the whole backend list and removes backends that are not in `backends` or
+  related over `backend-trino-catalog`.
 - If the `postgresql` integration is removed, the unit becomes Blocked but the gateway keeps
   running, so clients get errors from the gateway rather than refused connections.
 

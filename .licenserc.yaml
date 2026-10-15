@@ -28,4 +28,5 @@ header:
     - 'apm.lock.yaml'
     - '**/keyring_broker.py'
     - 'lib/charms/data_platform_libs/**'
+    - 'lib/charms/trino_k8s/**'
   comment: on-failure

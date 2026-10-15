@@ -7,11 +7,9 @@ import json
 import logging
 import urllib.request
 from collections.abc import Iterable
-from dataclasses import dataclass, field
-from typing import Any
 
-import constants
 from config import BackendConfig
+from core.backends import GatewayBackend, plan_sync
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +26,54 @@ class GatewayApiClient:
     def __init__(self, base_url: str):
         self._base_url = base_url.rstrip("/")
 
-    def list_backends(self) -> list[dict[str, Any]]:
-        """Return every backend registered with the gateway."""
+    def list_backends(self) -> list[GatewayBackend]:
+        """Return every backend registered with the gateway.
+
+        Returns:
+            The registered backends.
+
+        Raises:
+            GatewayApiError: if the gateway cannot be reached or returns an unexpected response.
+        """
         body = self._request("GET", "/gateway/backend/all")
         try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
+            entries = json.loads(body)
+            if not isinstance(entries, list):
+                raise ValueError("expected a list")
+            return [GatewayBackend.from_api(entry) for entry in entries]
+        except ValueError as e:
             raise GatewayApiError(f"invalid backend list: {e}") from e
 
-    def add(self, backend: dict[str, Any]) -> None:
-        """Register a backend."""
+    def add(self, backend: GatewayBackend) -> None:
+        """Register a backend.
+
+        Args:
+            backend: The backend to register.
+
+        Raises:
+            GatewayApiError: if the gateway cannot be reached or rejects the request.
+        """
         self._request(
-            "POST", "/gateway/backend/modify/add", json.dumps(backend), "application/json"
+            "POST",
+            "/gateway/backend/modify/add",
+            json.dumps(backend.to_api()),
+            "application/json",
         )
 
-    def update(self, backend: dict[str, Any]) -> None:
-        """Update a registered backend, matched by name."""
+    def update(self, backend: GatewayBackend) -> None:
+        """Update a registered backend, matched by name.
+
+        Args:
+            backend: The backend with its new values.
+
+        Raises:
+            GatewayApiError: if the gateway cannot be reached or rejects the request.
+        """
         self._request(
-            "POST", "/gateway/backend/modify/update", json.dumps(backend), "application/json"
+            "POST",
+            "/gateway/backend/modify/update",
+            json.dumps(backend.to_api()),
+            "application/json",
         )
 
     def delete(self, name: str) -> None:
@@ -70,67 +98,23 @@ class GatewayApiClient:
             raise GatewayApiError(f"{method} {path} failed: {e}") from e
 
 
-@dataclass
-class SyncPlan:
-    """Changes needed to make the gateway's backends match the desired set."""
-
-    add: list[dict[str, Any]] = field(default_factory=list)
-    update: list[dict[str, Any]] = field(default_factory=list)
-    delete: list[str] = field(default_factory=list)
-
-
-def to_entry(backend: BackendConfig) -> dict[str, Any]:
-    """Convert a configured backend to the gateway's API representation."""
-    return {
-        "name": backend.name,
-        "proxyTo": backend.url,
-        "active": True,
-        "routingGroup": constants.DEFAULT_ROUTING_GROUP,
-        "externalUrl": backend.url,
-    }
-
-
-def plan_sync(desired: Iterable[BackendConfig], current: Iterable[dict[str, Any]]) -> SyncPlan:
-    """Compute the changes that make `current` match `desired`.
-
-    The charm owns the whole backend table, so anything not desired is deleted.
-
-    Args:
-        desired: Backends from the charm configuration.
-        current: Backends as returned by the gateway.
-
-    Returns:
-        The backends to add, update and delete.
-    """
-    current_by_name = {entry["name"]: entry for entry in current}
-    plan = SyncPlan()
-    for entry in map(to_entry, desired):
-        existing = current_by_name.pop(entry["name"], None)
-        if existing is None:
-            plan.add.append(entry)
-        elif any(existing.get(key) != value for key, value in entry.items()):
-            plan.update.append(entry)
-    plan.delete = sorted(current_by_name)
-    return plan
-
-
 def sync_backends(client: GatewayApiClient, desired: Iterable[BackendConfig]) -> None:
     """Make the gateway's registered backends match `desired`.
 
     Args:
         client: Client for the gateway API.
-        desired: Backends from the charm configuration.
+        desired: The backends the gateway should have.
 
     Raises:
         GatewayApiError: if the gateway cannot be reached or rejects a change.
     """
     plan = plan_sync(desired, client.list_backends())
     for name in plan.delete:
-        logger.info("Deregistering backend %s", name)
+        logger.info("Deregistering backend %r", name)
         client.delete(name)
-    for entry in plan.update:
-        logger.info("Updating backend %s", entry["name"])
-        client.update(entry)
-    for entry in plan.add:
-        logger.info("Registering backend %s", entry["name"])
-        client.add(entry)
+    for backend in plan.update:
+        logger.info("Updating backend %r", backend.name)
+        client.update(backend)
+    for backend in plan.add:
+        logger.info("Registering backend %r", backend.name)
+        client.add(backend)

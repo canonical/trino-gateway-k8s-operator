@@ -14,4 +14,7 @@ DEFAULT_ROUTING_GROUP = "adhoc"
 NODE_ENVIRONMENT = "trino_gateway_k8s"
 
 POSTGRESQL_RELATION = "postgresql"
+BACKEND_TRINO_CATALOG_RELATION = "backend-trino-catalog"
+# Up to 63 characters, starting with a letter or digit.
+BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
 DATABASE_NAME = "trino_gateway"

@@ -1,53 +1,22 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
 import textwrap
 import time
-import urllib.error
-import urllib.request
 
 import jubilant
 import pytest
 import trino
+from helpers import APP, UNIT, gateway_request, wait_for_backends
 
-APP = "trino-gateway-k8s"
-UNIT = f"{APP}/0"
 POSTGRESQL = "postgresql-k8s"
 TRINO = "trino-k8s"
 BACKEND = "trino-a"
+NO_BACKENDS = "no backends configured or related"
 
 
 def _trino_url(juju: jubilant.Juju) -> str:
     return f"http://{TRINO}.{juju.model}.svc.cluster.local:8080"
-
-
-def _gateway_request(juju: jubilant.Juju, path: str, body: dict | None = None) -> bytes:
-    address = juju.status().apps[APP].units[UNIT].address
-    request = urllib.request.Request(
-        f"http://{address}:8080{path}",
-        data=None if body is None else json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-        return response.read()
-
-
-def _wait_for_backends(juju: jubilant.Juju, expected: list[dict], timeout: float = 600) -> None:
-    """Poll the gateway until its backends match; the charm syncs on its next hook."""
-    keys = ("name", "proxyTo", "active", "routingGroup")
-    deadline = time.monotonic() + timeout
-    current = None
-    while time.monotonic() < deadline:
-        try:
-            backends = json.loads(_gateway_request(juju, "/gateway/backend/all"))
-            current = sorted(({k: b.get(k) for k in keys} for b in backends), key=str)
-        except (urllib.error.URLError, ConnectionError):
-            current = None
-        if current == sorted(({k: b[k] for k in keys} for b in expected), key=str):
-            return
-        time.sleep(10)
-    raise AssertionError(f"gateway backends {current} never matched {expected}")
 
 
 def _query_through_gateway(juju: jubilant.Juju, query: str, timeout: float = 600) -> list:
@@ -72,6 +41,7 @@ def _query_through_gateway(juju: jubilant.Juju, query: str, timeout: float = 600
 @pytest.mark.incremental
 class TestBackends:
     def test_deploy(self, charm_path: str, resource_images: dict[str, str], juju: jubilant.Juju):
+        """The gateway, PostgreSQL and Trino deploy and the gateway reports no backends."""
         juju.model_config({"update-status-hook-interval": "30s"})
         juju.deploy(charm_path, app=APP, resources=resource_images)
         juju.deploy(POSTGRESQL, channel="14/stable", trust=True)
@@ -79,9 +49,10 @@ class TestBackends:
         juju.integrate(APP, POSTGRESQL)
         status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
-        assert status.apps[APP].units[UNIT].workload_status.message == "no backends configured"
+        assert status.apps[APP].units[UNIT].workload_status.message == NO_BACKENDS
 
     def test_configured_backend_is_registered(self, juju: jubilant.Juju):
+        """A backend in the charm configuration is registered with the gateway."""
         url = _trino_url(juju)
         backends = textwrap.dedent(f"""\
             - name: {BACKEND}
@@ -90,7 +61,7 @@ class TestBackends:
         juju.config(APP, {"backends": backends})
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
-        _wait_for_backends(
+        wait_for_backends(
             juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
         )
 
@@ -100,8 +71,9 @@ class TestBackends:
         assert rows
 
     def test_backend_added_outside_charm_is_removed(self, juju: jubilant.Juju):
+        """A backend added through the gateway's API is removed again by the charm."""
         url = _trino_url(juju)
-        _gateway_request(
+        gateway_request(
             juju,
             "/gateway/backend/modify/add",
             {
@@ -112,13 +84,14 @@ class TestBackends:
             },
         )
 
-        _wait_for_backends(
+        wait_for_backends(
             juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
         )
 
     def test_removed_backend_is_deregistered(self, juju: jubilant.Juju):
+        """Clearing the configuration deregisters the backend."""
         juju.config(APP, reset="backends")
         status = juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
-        assert status.apps[APP].units[UNIT].workload_status.message == "no backends configured"
-        _wait_for_backends(juju, [])
+        assert status.apps[APP].units[UNIT].workload_status.message == NO_BACKENDS
+        wait_for_backends(juju, [])

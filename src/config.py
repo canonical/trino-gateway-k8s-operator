@@ -10,8 +10,7 @@ from urllib.parse import urlsplit
 import pydantic
 import yaml
 
-# Up to 63 characters, starting with a letter or digit.
-_BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+import constants
 
 
 class BackendConfig(pydantic.BaseModel):
@@ -25,8 +24,19 @@ class BackendConfig(pydantic.BaseModel):
     @pydantic.field_validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:
-        if not re.fullmatch(_BACKEND_NAME_PATTERN, value):
-            raise ValueError(f"must match {_BACKEND_NAME_PATTERN}")
+        """Check that the name is one the gateway and the charm accept.
+
+        Args:
+            value: The proposed backend name.
+
+        Returns:
+            The name, unchanged.
+
+        Raises:
+            ValueError: if the name does not match the backend name pattern.
+        """
+        if not re.fullmatch(constants.BACKEND_NAME_PATTERN, value):
+            raise ValueError(f"must match {constants.BACKEND_NAME_PATTERN}")
         return value
 
     @pydantic.field_validator("url")

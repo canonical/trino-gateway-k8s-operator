@@ -8,25 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Self
 
 import constants
-from config import BackendConfig
 from relations.backend_trino_catalog import RelatedBackend
-
-
-class BackendNameConflictError(Exception):
-    """Two desired backends share a name.
-
-    Attributes:
-        names: The names that occur more than once, sorted.
-    """
-
-    def __init__(self, names: list[str]):
-        """Initialise the error.
-
-        Args:
-            names: The names that occur more than once, sorted.
-        """
-        super().__init__(f"duplicate backend names: {', '.join(names)}")
-        self.names = names
 
 
 @dataclass(frozen=True)
@@ -48,11 +30,11 @@ class GatewayBackend:
     external_url: str | None
 
     @classmethod
-    def from_config(cls, backend: BackendConfig) -> Self:
-        """Build the backend the gateway should have for a configured one.
+    def from_related(cls, backend: RelatedBackend) -> Self:
+        """Build the backend the gateway should have for a related one.
 
         Args:
-            backend: The backend from the charm configuration or a relation.
+            backend: The backend of a related Trino application.
 
         Returns:
             The backend in the default routing group.
@@ -121,7 +103,7 @@ class SyncPlan:
     delete: list[str] = field(default_factory=list)
 
 
-def plan_sync(desired: Iterable[BackendConfig], current: Iterable[GatewayBackend]) -> SyncPlan:
+def plan_sync(desired: Iterable[RelatedBackend], current: Iterable[GatewayBackend]) -> SyncPlan:
     """Compute the changes that make `current` match `desired`.
 
     The charm owns the whole backend table, so anything not desired is deleted.
@@ -135,7 +117,7 @@ def plan_sync(desired: Iterable[BackendConfig], current: Iterable[GatewayBackend
     """
     current_by_name = {backend.name: backend for backend in current}
     plan = SyncPlan()
-    for backend in map(GatewayBackend.from_config, desired):
+    for backend in map(GatewayBackend.from_related, desired):
         existing = current_by_name.pop(backend.name, None)
         if existing is None:
             plan.add.append(backend)
@@ -143,28 +125,3 @@ def plan_sync(desired: Iterable[BackendConfig], current: Iterable[GatewayBackend
             plan.update.append(backend)
     plan.delete = sorted(current_by_name)
     return plan
-
-
-def merge_backends(
-    configured: list[BackendConfig], related: Iterable[RelatedBackend]
-) -> list[BackendConfig]:
-    """Union the configured and related backends.
-
-    Names are compared case-sensitively, as the gateway's primary key is.
-
-    Args:
-        configured: Backends from the charm configuration.
-        related: Backends from related Trino applications.
-
-    Returns:
-        The configured backends followed by the related ones.
-
-    Raises:
-        BackendNameConflictError: if any name occurs more than once.
-    """
-    merged = [*configured, *(BackendConfig(name=r.name, url=r.url) for r in related)]
-    names = [backend.name for backend in merged]
-    duplicates = sorted({name for name in names if names.count(name) > 1})
-    if duplicates:
-        raise BackendNameConflictError(duplicates)
-    return merged

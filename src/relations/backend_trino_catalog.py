@@ -7,12 +7,13 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import ops
+import pydantic
 from charms.trino_k8s.v0.trino_catalog import TrinoCatalog, TrinoCatalogRequirer
 
 import constants
-from config import BackendConfig
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,45 @@ _MAX_PORT = 65535
 # 54 characters of the name, a dash and 8 hex digits fill the 63-character name limit.
 _NAME_PREFIX_LENGTH = 54
 _NAME_HASH_LENGTH = 8
+
+
+class _BackendFields(pydantic.BaseModel):
+    """The name and URL of a backend, checked against what the gateway and the charm accept."""
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+    name: str
+    url: str
+
+    @pydantic.field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        """Check that the name is one the gateway and the charm accept.
+
+        Args:
+            value: The proposed backend name.
+
+        Returns:
+            The name, unchanged.
+
+        Raises:
+            ValueError: if the name does not match the backend name pattern.
+        """
+        if not re.fullmatch(constants.BACKEND_NAME_PATTERN, value):
+            raise ValueError(f"must match {constants.BACKEND_NAME_PATTERN}")
+        return value
+
+    @pydantic.field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str) -> str:
+        parts = urlsplit(value)
+        # Reading .port raises ValueError for a malformed port.
+        if parts.scheme not in ("http", "https") or not parts.hostname or parts.port == 0:
+            raise ValueError("must be an http(s) URL with a host")
+        if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
+            raise ValueError("must not have a path, query, fragment or userinfo")
+        # Stored without a trailing slash so it compares equal to what the gateway returns.
+        return value.rstrip("/")
 
 
 @dataclass(frozen=True)
@@ -130,7 +170,7 @@ def load(requirer: TrinoCatalogRequirer, relations: list[ops.Relation]) -> Relat
     for relation_id, info in info_by_relation.items():
         remote_app = info["remote_app"]
         try:
-            validated = BackendConfig(
+            validated = _BackendFields(
                 name=backend_name(remote_app), url=backend_url(info["trino_url"])
             )
             catalogs = _catalog_names(info["trino_catalogs"])

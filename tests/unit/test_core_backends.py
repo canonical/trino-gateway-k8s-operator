@@ -3,12 +3,17 @@
 
 import pytest
 
-from config import BackendConfig
-from core.backends import BackendNameConflictError, GatewayBackend, merge_backends, plan_sync
+from core.backends import GatewayBackend, plan_sync
 from relations.backend_trino_catalog import RelatedBackend
 
-A = BackendConfig(name="a", url="http://a:8080")
-B = BackendConfig(name="b", url="http://b:8080")
+
+def _related(name: str, url: str) -> RelatedBackend:
+    """Build a related backend with no catalogs."""
+    return RelatedBackend(name=name, url=url, catalogs=(), relation_id=1, remote_app=name)
+
+
+A = _related("a", "http://a:8080")
+B = _related("b", "http://b:8080")
 
 
 def _backend(name: str, url: str, **overrides) -> GatewayBackend:
@@ -24,16 +29,9 @@ def _backend(name: str, url: str, **overrides) -> GatewayBackend:
     return GatewayBackend(**fields)
 
 
-def _related(name: str, url: str = "http://r:8080", relation_id: int = 1) -> RelatedBackend:
-    """Build a related backend with no catalogs."""
-    return RelatedBackend(
-        name=name, url=url, catalogs=(), relation_id=relation_id, remote_app=name
-    )
-
-
-def test_from_config_uses_default_routing_group():
-    """A configured backend is active in the adhoc group and redirects to its own URL."""
-    assert GatewayBackend.from_config(A) == _backend("a", "http://a:8080")
+def test_from_related_uses_default_routing_group():
+    """A related backend is active in the adhoc group and redirects to its own URL."""
+    assert GatewayBackend.from_related(A) == _backend("a", "http://a:8080")
 
 
 def test_api_round_trip():
@@ -99,43 +97,3 @@ def test_plan_sync_overwrites_drift(drift: dict):
     plan = plan_sync([A], [_backend("a", "http://a:8080", **drift)])
 
     assert plan.update == [_backend("a", "http://a:8080")]
-
-
-def test_merge_backends_unions_configured_then_related():
-    """Configured backends come first, in order, followed by the related ones."""
-    merged = merge_backends([B, A], [_related("z", "http://z:80"), _related("c")])
-
-    assert merged == [
-        B,
-        A,
-        BackendConfig(name="z", url="http://z:80"),
-        BackendConfig(name="c", url="http://r:8080"),
-    ]
-
-
-def test_merge_backends_with_nothing_is_empty():
-    """Without any source there are no backends."""
-    assert merge_backends([], []) == []
-
-
-def test_merge_backends_rejects_config_and_relation_clash():
-    """A related backend named like a configured one is a conflict."""
-    with pytest.raises(BackendNameConflictError) as error:
-        merge_backends([A, B], [_related("b")])
-
-    assert error.value.names == ["b"]
-
-
-def test_merge_backends_rejects_relation_clash_with_sorted_names():
-    """Duplicates among related backends are reported once each, sorted."""
-    with pytest.raises(BackendNameConflictError) as error:
-        merge_backends([], [_related("y"), _related("x"), _related("y"), _related("x")])
-
-    assert error.value.names == ["x", "y"]
-
-
-def test_merge_backends_is_case_sensitive():
-    """Names differing only in case do not conflict, like the gateway's primary key."""
-    merged = merge_backends([A], [_related("A")])
-
-    assert [backend.name for backend in merged] == ["a", "A"]

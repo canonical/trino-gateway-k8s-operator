@@ -146,6 +146,17 @@ def test_load_skips_name_that_stays_invalid_after_shortening(caplog: pytest.LogC
     assert "'bad name!'" in caplog.text
 
 
+@pytest.mark.parametrize(
+    "trino_url", ["?:8080", "a/v1:8080", "a?x=1:8080", "a#x:8080", "user@a:8080"]
+)
+def test_load_skips_address_that_does_not_make_a_valid_url(trino_url: str):
+    """An address that would put a path, query, fragment or userinfo in the URL is skipped."""
+    result, _ = _load([_info(1, "trino-a", trino_url)])
+
+    assert result.backends == []
+    assert result.skipped == 1
+
+
 def test_load_skips_relation_with_non_string_catalog_names(caplog: pytest.LogCaptureFixture):
     """A relation advertising a non-string catalog name is logged and skipped, not raised on."""
     caplog.set_level(logging.WARNING)

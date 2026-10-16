@@ -14,8 +14,6 @@ from charms.trino_k8s.v0.trino_catalog import TrinoCatalogRequirer
 import constants
 import gateway_api
 import workload
-from config import BackendConfig, CharmConfig, describe_error
-from core.backends import BackendNameConflictError, merge_backends
 from gateway_api import GatewayApiClient, GatewayApiError
 from relations import backend_trino_catalog
 from relations.backend_trino_catalog import RelatedBackends
@@ -75,17 +73,9 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         if not self.unit.is_leader():
             return
         try:
-            config = self.load_config(CharmConfig, errors="raise")
-        except pydantic.ValidationError:
-            return
-        try:
-            desired, _ = self._load_backends(config)  # pyright: ignore[reportAssignmentType]
-        except BackendNameConflictError as e:
-            logger.error("Backend sync stopped: %s", e)
-            return
-        try:
             gateway_api.sync_backends(
-                GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}"), desired
+                GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}"),
+                self._load_backends().backends,
             )
         except GatewayApiError as e:
             # The gateway may still be starting after a restart; a later hook converges.
@@ -109,19 +99,10 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         elif self._container.can_connect() and not workload.is_running(self._container):
             event.add_status(ops.MaintenanceStatus("gateway service is not running"))
 
-        try:
-            config = self.load_config(CharmConfig, errors="raise")
-        except pydantic.ValidationError as e:
-            event.add_status(ops.BlockedStatus(f"invalid backends config: {describe_error(e)}"))
-            return
-        try:
-            desired, related = self._load_backends(config)
-        except BackendNameConflictError as e:
-            event.add_status(ops.BlockedStatus(f"backend name conflict: {', '.join(e.names)}"))
-            return
+        related = self._load_backends()
         messages = []
-        if not desired:
-            messages.append("no backends configured or related")
+        if not related.backends and not related.skipped:
+            messages.append("no backends related")
         if related.skipped:
             noun = "relation" if related.skipped == 1 else "relations"
             messages.append(
@@ -129,23 +110,15 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             )
         event.add_status(ops.ActiveStatus("; ".join(messages)))
 
-    def _load_backends(self, config: CharmConfig) -> tuple[list[BackendConfig], RelatedBackends]:
-        """Union the configured backends with those of related Trino applications.
-
-        Args:
-            config: The validated charm configuration.
+    def _load_backends(self) -> RelatedBackends:
+        """Read the backends of the Trino applications related over `backend-trino-catalog`.
 
         Returns:
-            The backends the gateway should have, and the related backends the union was built
-            from, whose `skipped` count the caller can report.
-
-        Raises:
-            BackendNameConflictError: if a name occurs more than once.
+            The backends the gateway should have, and the count of relations that yielded none.
         """
-        related = backend_trino_catalog.load(
+        return backend_trino_catalog.load(
             self._trino_catalog, self.model.relations[constants.BACKEND_TRINO_CATALOG_RELATION]
         )
-        return merge_backends(config.backends, related.backends), related
 
     def _load_postgresql(self) -> PostgresRelationModel | None:
         """Load the PostgreSQL relation data, or None if it is absent or incomplete."""

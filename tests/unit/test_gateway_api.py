@@ -9,12 +9,12 @@ from unittest.mock import MagicMock, call
 import pytest
 
 import gateway_api
-from config import BackendConfig
 from core.backends import GatewayBackend
 from gateway_api import GatewayApiClient, GatewayApiError, sync_backends
+from relations.backend_trino_catalog import RelatedBackend
 
-A = BackendConfig(name="a", url="http://a:8080")
-B = BackendConfig(name="b", url="http://b:8080")
+A = RelatedBackend(name="a", url="http://a:8080", catalogs=(), relation_id=1, remote_app="a")
+B = RelatedBackend(name="b", url="http://b:8080", catalogs=(), relation_id=2, remote_app="b")
 
 
 def _backend(name: str, url: str) -> GatewayBackend:

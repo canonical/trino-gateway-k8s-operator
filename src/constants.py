@@ -15,6 +15,14 @@ NODE_ENVIRONMENT = "trino_gateway_k8s"
 
 POSTGRESQL_RELATION = "postgresql"
 BACKEND_TRINO_CATALOG_RELATION = "backend-trino-catalog"
+TRINO_CATALOG_RELATION = "trino-catalog"
+TRINO_GATEWAY_INTEGRATION_RELATION = "trino-gateway-integration"
+PEER_RELATION = "peer"
+ISSUED_USERS_KEY = "issued-users"
+REQUESTED_USERS_KEY = "requested_users"
+USER_SECRET_LABEL_PREFIX = "trino-catalog-user-"  # nosec B105 - a label, not a password
+# Never matches the `app-` prefix of the users the Trino charm issues itself.
+USERNAME_PREFIX = "gw-"
 # Up to 63 characters, starting with a letter or digit.
 BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
 DATABASE_NAME = "trino_gateway"

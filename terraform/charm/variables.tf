@@ -69,14 +69,14 @@ variable "model_uuid" {
 }
 
 variable "offered_endpoints" {
-  description = "Provided endpoints to offer for cross-model integration. Trino Gateway currently provides none."
+  description = "Provided endpoints to offer for cross-model integration: trino-catalog and trino-gateway-integration."
   type        = list(string)
   default     = []
   nullable    = false
 
   validation {
-    condition     = length(var.offered_endpoints) == 0
-    error_message = "offered_endpoints must be empty because Trino Gateway currently provides no endpoints."
+    condition     = alltrue([for endpoint in var.offered_endpoints : contains(["trino-catalog", "trino-gateway-integration"], endpoint)])
+    error_message = "offered_endpoints may only contain trino-catalog and trino-gateway-integration."
   }
 }
 

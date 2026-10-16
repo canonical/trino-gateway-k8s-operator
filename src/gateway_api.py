@@ -8,8 +8,8 @@ import logging
 import urllib.request
 from collections.abc import Iterable
 
-from config import BackendConfig
 from core.backends import GatewayBackend, plan_sync
+from relations.backend_trino_catalog import RelatedBackend
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class GatewayApiClient:
             raise GatewayApiError(f"{method} {path} failed: {e}") from e
 
 
-def sync_backends(client: GatewayApiClient, desired: Iterable[BackendConfig]) -> None:
+def sync_backends(client: GatewayApiClient, desired: Iterable[RelatedBackend]) -> None:
     """Make the gateway's registered backends match `desired`.
 
     Args:

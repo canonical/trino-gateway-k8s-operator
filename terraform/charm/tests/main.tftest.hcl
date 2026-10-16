@@ -29,8 +29,32 @@ run "basic_deploy" {
   }
 
   assert {
-    condition     = length(output.provides) == 0
-    error_message = "Trino Gateway should not report undeclared provided endpoints"
+    condition     = keys(output.provides) == ["trino_catalog", "trino_gateway_integration"]
+    error_message = "Trino Gateway should provide the trino_catalog and trino_gateway_integration endpoints"
+  }
+
+  assert {
+    condition     = output.provides.trino_catalog.endpoint == "trino-catalog" && output.provides.trino_catalog.name == "trino-gateway-k8s"
+    error_message = "trino_catalog provider did not reference the application endpoint"
+  }
+
+  assert {
+    condition     = output.provides.trino_gateway_integration.endpoint == "trino-gateway-integration" && output.provides.trino_gateway_integration.name == "trino-gateway-k8s"
+    error_message = "trino_gateway_integration provider did not reference the application endpoint"
+  }
+}
+
+run "offered_endpoints" {
+  command = plan
+
+  variables {
+    model_uuid        = run.setup.model_uuid
+    offered_endpoints = ["trino-catalog", "trino-gateway-integration"]
+  }
+
+  assert {
+    condition     = keys(output.offers) == ["trino-catalog", "trino-gateway-integration"]
+    error_message = "an offer should be created for each offered endpoint"
   }
 }
 

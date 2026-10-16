@@ -14,8 +14,10 @@ from charms.trino_k8s.v0.trino_catalog import TrinoCatalogRequirer
 import constants
 import gateway_api
 import workload
+from core import users
+from exceptions import MalformedIssuedUsersError
 from gateway_api import GatewayApiClient, GatewayApiError
-from relations import backend_trino_catalog
+from relations import backend_trino_catalog, peer, trino_catalog, trino_gateway_integration
 from relations.backend_trino_catalog import RelatedBackends
 from workload import PostgresRelationModel
 
@@ -49,16 +51,26 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             self.on[constants.POSTGRESQL_RELATION].relation_broken,
             self.on[constants.BACKEND_TRINO_CATALOG_RELATION].relation_changed,
             self.on[constants.BACKEND_TRINO_CATALOG_RELATION].relation_broken,
+            self.on[constants.TRINO_CATALOG_RELATION].relation_created,
+            self.on[constants.TRINO_CATALOG_RELATION].relation_changed,
+            self.on[constants.TRINO_CATALOG_RELATION].relation_broken,
+            self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_created,
+            self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_changed,
+            self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_broken,
+            self.on[constants.PEER_RELATION].relation_created,
         ):
             framework.observe(event, self._reconcile)
         framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
 
     def _reconcile(self, _: ops.EventBase) -> None:
-        """Converge the workload and, on the leader, the gateway's backends.
+        """Converge the issued users, the workload and, on the leader, the gateway's backends.
 
         Args:
             _: The event that triggered the reconcile, which does not affect the outcome.
         """
+        # Issuing users needs neither Pebble nor the database.
+        self._issue_users()
+
         if not self._container.can_connect():
             return
         # The service is deliberately left running without the relation, so clients get
@@ -80,6 +92,48 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         except GatewayApiError as e:
             # The gateway may still be starting after a restart; a later hook converges.
             logger.warning("Backend sync failed, retrying on a later hook: %s", e)
+
+    def _issue_users(self) -> None:
+        """On the leader, issue one user per consumer and request every user from each upstream.
+
+        Secrets are created before the index records them and removed before the index drops
+        them, so an interrupted hook converges on the next reconcile.
+        """
+        peer_relation = self.model.get_relation(constants.PEER_RELATION)
+        if not self.unit.is_leader() or peer_relation is None:
+            return
+        try:
+            issued = peer.load_issued_users(peer_relation)
+        except MalformedIssuedUsersError as e:
+            logger.warning("Not issuing users because the issued-user index is malformed: %s", e)
+            return
+
+        plan = users.plan_issuance(
+            issued,
+            trino_catalog.consumers(self.model.relations[constants.TRINO_CATALOG_RELATION]),
+            model_uuid=self.model.uuid,
+            gateway_app=self.app.name,
+        )
+        secrets_by_username = {
+            user.username: trino_catalog.ensure_user_secret(
+                self.model, user.relation_id, user.username
+            )
+            for user in plan.users
+        }
+        for relation_id in plan.remove:
+            trino_catalog.remove_user_secret(self.model, relation_id)
+        peer.save_issued_users(
+            peer_relation, self.app, {user.relation_id: user.username for user in plan.users}
+        )
+        for relation_id, username in plan.issue.items():
+            logger.info("Issued user %r to trino-catalog relation %r", username, relation_id)
+        for relation_id in plan.remove:
+            logger.info(
+                "Removed user %r of trino-catalog relation %r", issued[relation_id], relation_id
+            )
+
+        for relation in self.model.relations[constants.TRINO_GATEWAY_INTEGRATION_RELATION]:
+            trino_gateway_integration.publish(relation, self.app, secrets_by_username)
 
     def _on_collect_unit_status(self, event: ops.CollectStatusEvent) -> None:
         """Derive the unit status from observed state.

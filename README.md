@@ -62,6 +62,18 @@ restarts, the backend list may only converge on the following `update-status` ho
   backend is registered but unhealthy.
 - The credentials in the relation are not used.
 
+## Consumer users
+
+The charm provides `trino-catalog` for consumers such as Superset and DataHub, and
+`trino-gateway-integration` for Trino applications that should accept those consumers'
+credentials. The leader issues one Trino user per `trino-catalog` relation, stores its
+credentials in a Juju secret, and requests every issued user from each application related over
+`trino-gateway-integration`. Usernames start with `gw-` and stay the same for the lifetime of the
+relation; a user is withdrawn when its relation is removed.
+
+This is work in progress: consumers do not receive any connection data yet, and backend
+registration does not depend on which users a Trino application has accepted.
+
 ## Connect a client
 
 Clients connect to the gateway's Kubernetes Service over HTTP, using their usual Trino

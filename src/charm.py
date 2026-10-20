@@ -87,18 +87,14 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         try:
             gateway_api.sync_backends(
                 GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}"),
-                self._load_backends().backends,
+                self._load_related_backends().backends,
             )
         except GatewayApiError as e:
             # The gateway may still be starting after a restart; a later hook converges.
             logger.warning("Backend sync failed, retrying on a later hook: %s", e)
 
     def _issue_users(self) -> None:
-        """On the leader, issue one user per consumer and request every user from each upstream.
-
-        Secrets are created before the index records them and removed before the index drops
-        them, so an interrupted hook converges on the next reconcile.
-        """
+        """On the leader, issue one user per consumer and request every user from each upstream."""
         peer_relation = self.model.get_relation(constants.PEER_RELATION)
         if not self.unit.is_leader() or peer_relation is None:
             return
@@ -153,7 +149,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         elif self._container.can_connect() and not workload.is_running(self._container):
             event.add_status(ops.MaintenanceStatus("gateway service is not running"))
 
-        related = self._load_backends()
+        related = self._load_related_backends()
         messages = []
         if not related.backends and not related.skipped:
             messages.append("no backends related")
@@ -164,7 +160,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             )
         event.add_status(ops.ActiveStatus("; ".join(messages)))
 
-    def _load_backends(self) -> RelatedBackends:
+    def _load_related_backends(self) -> RelatedBackends:
         """Read the backends of the Trino applications related over `backend-trino-catalog`.
 
         Returns:

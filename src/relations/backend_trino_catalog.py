@@ -53,14 +53,28 @@ class _BackendFields(pydantic.BaseModel):
     @pydantic.field_validator("url")
     @classmethod
     def _validate_url(cls, value: str) -> str:
-        parts = urlsplit(value)
-        # Reading .port raises ValueError for a malformed port.
-        if parts.scheme not in ("http", "https") or not parts.hostname or parts.port == 0:
-            raise ValueError("must be an http(s) URL with a host")
-        if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
-            raise ValueError("must not have a path, query, fragment or userinfo")
-        # Stored without a trailing slash so it compares equal to what the gateway returns.
-        return value.rstrip("/")
+        return _check_url(value)
+
+
+def _check_url(value: str) -> str:
+    """Check that a URL is one the gateway accepts as a backend URL.
+
+    Args:
+        value: The proposed URL.
+
+    Returns:
+        The URL without a trailing slash, so it compares equal to what the gateway returns.
+
+    Raises:
+        ValueError: if the URL is not an http(s) URL with only a scheme, host and port.
+    """
+    parts = urlsplit(value)
+    # Reading .port raises ValueError for a malformed port.
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.port == 0:
+        raise ValueError("must be an http(s) URL with a host")
+    if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
+        raise ValueError("must not have a path, query, fragment or userinfo")
+    return value.rstrip("/")
 
 
 @dataclass(frozen=True)
@@ -131,6 +145,21 @@ def backend_url(trino_url: str) -> str:
         raise ValueError("trino_url has an invalid port")
     scheme = "https" if int(port) == _HTTPS_PORT else "http"
     return f"{scheme}://{host}:{port}"
+
+
+def normalise_url(trino_url: str) -> str:
+    """Turn an advertised `host:port` address into the URL a backend for it would have.
+
+    Args:
+        trino_url: The advertised `host:port` address.
+
+    Returns:
+        The validated backend URL, comparable with `RelatedBackend.url`.
+
+    Raises:
+        ValueError: if the address does not make a valid backend URL.
+    """
+    return _check_url(backend_url(trino_url))
 
 
 def _catalog_names(catalogs: list[TrinoCatalog]) -> tuple[str, ...]:

@@ -5,7 +5,10 @@ locals {
   # null means no expose block; {} means an empty (expose-all) block.
   expose_blocks = var.expose == null ? [] : [var.expose]
 
-  provided_endpoints = {}
+  provided_endpoints = {
+    trino_catalog             = "trino-catalog"
+    trino_gateway_integration = "trino-gateway-integration"
+  }
   required_endpoints = {
     backend_trino_catalog = "backend-trino-catalog"
     postgresql            = "postgresql"

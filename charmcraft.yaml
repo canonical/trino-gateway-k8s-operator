@@ -48,6 +48,18 @@ requires:
     interface: trino_catalog
     optional: true
 
+provides:
+  trino-catalog:
+    interface: trino_catalog
+    optional: true
+  trino-gateway-integration:
+    interface: trino_gateway_integration
+    optional: true
+
+peers:
+  peer:
+    interface: trino_gateway_peers
+
 containers:
   trino-gateway:
     resource: trino-gateway-image

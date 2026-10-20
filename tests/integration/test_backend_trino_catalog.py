@@ -9,7 +9,7 @@ POSTGRESQL = "postgresql-k8s"
 TRINO = "trino-k8s"
 TRINO_APPS = ("trino-a", "trino-b")
 CATALOG_ENDPOINT = "trino-catalog"
-NO_BACKENDS = "no backends configured or related"
+NO_BACKENDS = "no backends related"
 
 
 def _expected(juju: jubilant.Juju, apps: tuple[str, ...]) -> list[dict]:

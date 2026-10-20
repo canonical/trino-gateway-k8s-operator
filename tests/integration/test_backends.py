@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import textwrap
 import time
 
 import jubilant
@@ -11,12 +10,18 @@ from helpers import APP, UNIT, gateway_request, wait_for_backends
 
 POSTGRESQL = "postgresql-k8s"
 TRINO = "trino-k8s"
-BACKEND = "trino-a"
-NO_BACKENDS = "no backends configured or related"
+CATALOG_ENDPOINT = "trino-catalog"
+NO_BACKENDS = "no backends related"
 
 
-def _trino_url(juju: jubilant.Juju) -> str:
-    return f"http://{TRINO}.{juju.model}.svc.cluster.local:8080"
+def _expected_backend(juju: jubilant.Juju) -> dict:
+    """Build the backend the gateway should list for the related Trino application."""
+    return {
+        "name": TRINO,
+        "proxyTo": f"http://{TRINO}.{juju.model}.svc.cluster.local:8080",
+        "active": True,
+        "routingGroup": "adhoc",
+    }
 
 
 def _query_through_gateway(juju: jubilant.Juju, query: str, timeout: float = 600) -> list:
@@ -51,19 +56,12 @@ class TestBackends:
 
         assert status.apps[APP].units[UNIT].workload_status.message == NO_BACKENDS
 
-    def test_configured_backend_is_registered(self, juju: jubilant.Juju):
-        """A backend in the charm configuration is registered with the gateway."""
-        url = _trino_url(juju)
-        backends = textwrap.dedent(f"""\
-            - name: {BACKEND}
-              url: {url}
-        """)
-        juju.config(APP, {"backends": backends})
+    def test_related_backend_is_registered(self, juju: jubilant.Juju):
+        """A Trino application related over `backend-trino-catalog` is registered."""
+        juju.integrate(f"{APP}:backend-trino-catalog", f"{TRINO}:{CATALOG_ENDPOINT}")
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
-        wait_for_backends(
-            juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
-        )
+        wait_for_backends(juju, [_expected_backend(juju)])
 
     def test_query_through_gateway_service(self, juju: jubilant.Juju):
         rows = _query_through_gateway(juju, "SELECT node_id FROM system.runtime.nodes")
@@ -72,7 +70,6 @@ class TestBackends:
 
     def test_backend_added_outside_charm_is_removed(self, juju: jubilant.Juju):
         """A backend added through the gateway's API is removed again by the charm."""
-        url = _trino_url(juju)
         gateway_request(
             juju,
             "/gateway/backend/modify/add",
@@ -84,13 +81,11 @@ class TestBackends:
             },
         )
 
-        wait_for_backends(
-            juju, [{"name": BACKEND, "proxyTo": url, "active": True, "routingGroup": "adhoc"}]
-        )
+        wait_for_backends(juju, [_expected_backend(juju)])
 
-    def test_removed_backend_is_deregistered(self, juju: jubilant.Juju):
-        """Clearing the configuration deregisters the backend."""
-        juju.config(APP, reset="backends")
+    def test_removed_relation_deregisters_backend(self, juju: jubilant.Juju):
+        """Removing the relation deregisters the backend."""
+        juju.remove_relation(f"{APP}:backend-trino-catalog", f"{TRINO}:{CATALOG_ENDPOINT}")
         status = juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
         assert status.apps[APP].units[UNIT].workload_status.message == NO_BACKENDS

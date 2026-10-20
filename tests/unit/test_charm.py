@@ -3,7 +3,6 @@
 
 import dataclasses
 import json
-import textwrap
 from unittest.mock import MagicMock
 
 import ops
@@ -13,13 +12,8 @@ from ops import testing
 import constants
 import gateway_api
 from charm import TrinoGatewayK8SOperatorCharm
-from config import BackendConfig
 
 USER = {"username": "gateway", "password": "s3cr3t-pw"}
-BACKENDS = textwrap.dedent("""\
-    - name: trino-a
-      url: http://trino-a:8080
-""")
 ROCK_LAYER = ops.pebble.Layer(
     {
         "services": {
@@ -139,7 +133,7 @@ def test_relation_ready_starts_gateway(ctx: testing.Context):
 
     state_out = ctx.run(ctx.on.relation_changed(relation), state)
 
-    assert state_out.unit_status == testing.ActiveStatus("no backends configured or related")
+    assert state_out.unit_status == testing.ActiveStatus("no backends related")
     container_out = state_out.get_container(constants.CONTAINER_NAME)
     service_status = container_out.service_statuses[constants.SERVICE_NAME]
     assert service_status == ops.pebble.ServiceStatus.ACTIVE
@@ -230,59 +224,19 @@ def sync_backends(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return mock
 
 
-def _ready_state(leader: bool = True, backends: str = BACKENDS) -> testing.State:
+def _ready_state(leader: bool = True) -> testing.State:
     secret = _secret()
     return testing.State(
         leader=leader,
-        config={"backends": backends},
         containers={_container()},
         relations={_relation(secret)},
         secrets={secret},
     )
 
 
-def test_leader_syncs_configured_backends(ctx: testing.Context, sync_backends: MagicMock):
-    state_out = ctx.run(ctx.on.config_changed(), _ready_state())
-
-    assert state_out.unit_status == testing.ActiveStatus()
-    sync_backends.assert_called_once()
-    assert sync_backends.call_args.args[1] == [
-        BackendConfig(name="trino-a", url="http://trino-a:8080")
-    ]
-
-
-def test_sync_errors_are_swallowed(ctx: testing.Context, sync_backends: MagicMock):
-    sync_backends.side_effect = gateway_api.GatewayApiError("connection refused")
-
-    state_out = ctx.run(ctx.on.update_status(), _ready_state())
-
-    assert state_out.unit_status == testing.ActiveStatus()
-
-
-def test_non_leader_does_not_sync(ctx: testing.Context, sync_backends: MagicMock):
-    ctx.run(ctx.on.config_changed(), _ready_state(leader=False))
-
-    sync_backends.assert_not_called()
-
-
-def test_invalid_backends_block_without_sync(ctx: testing.Context, sync_backends: MagicMock):
-    state_out = ctx.run(ctx.on.config_changed(), _ready_state(backends="- name: a"))
-
-    assert state_out.unit_status == testing.BlockedStatus(
-        "invalid backends config: [0].url: field required"
-    )
-    sync_backends.assert_not_called()
-    container_out = state_out.get_container(constants.CONTAINER_NAME)
-    service_status = container_out.service_statuses[constants.SERVICE_NAME]
-    assert service_status == ops.pebble.ServiceStatus.ACTIVE
-
-
-def test_empty_backends_are_active(ctx: testing.Context, sync_backends: MagicMock):
-    """With no backends from any source the unit is active and says so."""
-    state_out = ctx.run(ctx.on.config_changed(), _ready_state(backends=""))
-
-    assert state_out.unit_status == testing.ActiveStatus("no backends configured or related")
-    assert sync_backends.call_args.args[1] == []
+def _synced(sync_backends: MagicMock) -> list[tuple[str, str]]:
+    """List the name and URL of each backend the charm last asked to sync."""
+    return [(b.name, b.url) for b in sync_backends.call_args.args[1]]
 
 
 def _trino_relation(app: str = "trino-b", url: str = "trino-b:8080", **data) -> testing.Relation:
@@ -300,56 +254,69 @@ def _trino_relation(app: str = "trino-b", url: str = "trino-b:8080", **data) -> 
     )
 
 
-def _state_with(*relations: testing.Relation, leader: bool = True, backends: str = BACKENDS):
+def _state_with(*relations: testing.Relation, leader: bool = True):
     """Build a ready state with extra relations added."""
-    state = _ready_state(leader=leader, backends=backends)
+    state = _ready_state(leader=leader)
     return dataclasses.replace(state, relations={*state.relations, *relations})
 
 
-def test_leader_syncs_configured_and_related_backends(
-    ctx: testing.Context, sync_backends: MagicMock
-):
-    """The leader syncs the union of configured and related backends."""
-    state_out = ctx.run(ctx.on.config_changed(), _state_with(_trino_relation()))
+def test_leader_syncs_related_backends(ctx: testing.Context, sync_backends: MagicMock):
+    """The leader syncs one backend per related Trino application."""
+    relations = (_trino_relation("trino-a", "trino-a:8080"), _trino_relation())
+
+    state_out = ctx.run(ctx.on.config_changed(), _state_with(*relations))
 
     assert state_out.unit_status == testing.ActiveStatus()
-    assert sync_backends.call_args.args[1] == [
-        BackendConfig(name="trino-a", url="http://trino-a:8080"),
-        BackendConfig(name="trino-b", url="http://trino-b:8080"),
+    sync_backends.assert_called_once()
+    assert _synced(sync_backends) == [
+        ("trino-a", "http://trino-a:8080"),
+        ("trino-b", "http://trino-b:8080"),
     ]
 
 
-def test_related_backend_alone_is_active_without_message(
-    ctx: testing.Context, sync_backends: MagicMock
-):
-    """A related backend alone is synced, with an https URL for port 443."""
-    state = _state_with(_trino_relation(url="trino.example.com:443"), backends="")
+def test_https_url_for_port_443(ctx: testing.Context, sync_backends: MagicMock):
+    """A related backend on port 443 is synced with an https URL."""
+    state = _state_with(_trino_relation(url="trino.example.com:443"))
 
     state_out = ctx.run(ctx.on.config_changed(), state)
 
     assert state_out.unit_status == testing.ActiveStatus()
-    assert sync_backends.call_args.args[1] == [
-        BackendConfig(name="trino-b", url="https://trino.example.com:443")
-    ]
+    assert _synced(sync_backends) == [("trino-b", "https://trino.example.com:443")]
+
+
+def test_no_relations_report_no_backends_related(ctx: testing.Context, sync_backends: MagicMock):
+    """Without relations the unit is active, says so and syncs an empty backend list."""
+    state_out = ctx.run(ctx.on.config_changed(), _ready_state())
+
+    assert state_out.unit_status == testing.ActiveStatus("no backends related")
+    assert _synced(sync_backends) == []
+
+
+def test_sync_errors_are_swallowed(ctx: testing.Context, sync_backends: MagicMock):
+    sync_backends.side_effect = gateway_api.GatewayApiError("connection refused")
+
+    state_out = ctx.run(ctx.on.update_status(), _state_with(_trino_relation()))
+
+    assert state_out.unit_status == testing.ActiveStatus()
+
+
+def test_non_leader_does_not_sync(ctx: testing.Context, sync_backends: MagicMock):
+    ctx.run(ctx.on.config_changed(), _state_with(_trino_relation(), leader=False))
+
+    sync_backends.assert_not_called()
 
 
 def test_follower_reports_same_status_without_syncing(
     ctx: testing.Context, sync_backends: MagicMock
 ):
-    """A follower reports a conflict like the leader but writes nothing."""
+    """A follower reports the status the leader would, but writes nothing."""
     state_out = ctx.run(
-        ctx.on.config_changed(), _state_with(_trino_relation("trino-a"), leader=False)
+        ctx.on.config_changed(), _state_with(_trino_relation(url="no-port"), leader=False)
     )
 
-    assert state_out.unit_status == testing.BlockedStatus("backend name conflict: trino-a")
-    sync_backends.assert_not_called()
-
-
-def test_name_conflict_blocks_without_sync(ctx: testing.Context, sync_backends: MagicMock):
-    """A name shared by a configured and a related backend blocks and stops all writes."""
-    state_out = ctx.run(ctx.on.config_changed(), _state_with(_trino_relation("trino-a")))
-
-    assert state_out.unit_status == testing.BlockedStatus("backend name conflict: trino-a")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "1 backend-trino-catalog relation not ready"
+    )
     sync_backends.assert_not_called()
 
 
@@ -359,21 +326,30 @@ def test_url_change_keeps_name(ctx: testing.Context, sync_backends: MagicMock):
 
     ctx.run(ctx.on.relation_changed(relation), _state_with(relation))
 
-    assert (
-        BackendConfig(name="trino-b", url="http://new-host:8080")
-        in (sync_backends.call_args.args[1])
-    )
+    assert _synced(sync_backends) == [("trino-b", "http://new-host:8080")]
 
 
 def test_relation_broken_drops_backend(ctx: testing.Context, sync_backends: MagicMock):
     """Removing the relation removes its backend from the desired set."""
+    kept = _trino_relation("trino-a", "trino-a:8080")
+    removed = _trino_relation()
+
+    state_out = ctx.run(ctx.on.relation_broken(removed), _state_with(kept, removed))
+
+    assert _synced(sync_backends) == [("trino-a", "http://trino-a:8080")]
+    assert state_out.unit_status == testing.ActiveStatus()
+
+
+def test_last_relation_broken_reports_no_backends_related(
+    ctx: testing.Context, sync_backends: MagicMock
+):
+    """Removing the only relation leaves no backends and says so."""
     relation = _trino_relation()
 
-    ctx.run(ctx.on.relation_broken(relation), _state_with(relation))
+    state_out = ctx.run(ctx.on.relation_broken(relation), _state_with(relation))
 
-    assert sync_backends.call_args.args[1] == [
-        BackendConfig(name="trino-a", url="http://trino-a:8080")
-    ]
+    assert _synced(sync_backends) == []
+    assert state_out.unit_status == testing.ActiveStatus("no backends related")
 
 
 def test_incomplete_relation_does_not_block_or_stop_sync(
@@ -389,7 +365,23 @@ def test_incomplete_relation_does_not_block_or_stop_sync(
     assert state_out.unit_status == testing.ActiveStatus(
         "1 backend-trino-catalog relation not ready"
     )
-    assert [b.name for b in sync_backends.call_args.args[1]] == ["trino-a", "trino-b"]
+    assert [name for name, _ in _synced(sync_backends)] == ["trino-b"]
+
+
+def test_only_unready_relations_are_reported_as_not_ready(
+    ctx: testing.Context, sync_backends: MagicMock
+):
+    """With only unready relations the status reports them, not an absence of relations."""
+    incomplete = testing.Relation(
+        constants.BACKEND_TRINO_CATALOG_RELATION, remote_app_name="trino-c"
+    )
+
+    state_out = ctx.run(ctx.on.config_changed(), _state_with(incomplete))
+
+    assert state_out.unit_status == testing.ActiveStatus(
+        "1 backend-trino-catalog relation not ready"
+    )
+    assert _synced(sync_backends) == []
 
 
 def test_malformed_relations_are_counted(ctx: testing.Context, sync_backends: MagicMock):
@@ -404,7 +396,7 @@ def test_malformed_relations_are_counted(ctx: testing.Context, sync_backends: Ma
     assert state_out.unit_status == testing.ActiveStatus(
         "2 backend-trino-catalog relations not ready"
     )
-    assert [b.name for b in sync_backends.call_args.args[1]] == ["trino-a"]
+    assert _synced(sync_backends) == []
 
 
 def test_non_string_catalog_names_are_counted(ctx: testing.Context, sync_backends: MagicMock):
@@ -417,7 +409,7 @@ def test_non_string_catalog_names_are_counted(ctx: testing.Context, sync_backend
     assert state_out.unit_status == testing.ActiveStatus(
         "1 backend-trino-catalog relation not ready"
     )
-    assert [b.name for b in sync_backends.call_args.args[1]] == ["trino-a"]
+    assert _synced(sync_backends) == []
 
 
 def test_relation_created_publishes_app_name(ctx: testing.Context, sync_backends: MagicMock):

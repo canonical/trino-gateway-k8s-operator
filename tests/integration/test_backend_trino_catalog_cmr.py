@@ -12,12 +12,10 @@ POSTGRESQL = "postgresql-k8s"
 TRINO = "trino-k8s"
 CATALOG_ENDPOINT = "trino-catalog"
 GATEWAY_ENDPOINT = f"{APP}:backend-trino-catalog"
-NO_BACKENDS = "no backends configured or related"
+NO_BACKENDS = "no backends related"
 # The application, offer and alias differ so the test shows which one names the backend.
 OFFER = "trino-offer"
 ALIAS = "trino-remote"
-OTHER_ALIAS = "trino-other"
-CONFIGURED = "http://configured:8080"
 FETCH_SCRIPT = (
     "import sys, urllib.request; "
     "print(urllib.request.urlopen(sys.argv[1], timeout=10).read().decode())"
@@ -92,55 +90,13 @@ class TestBackendTrinoCatalogCrossModel:
 
         assert "nodeVersion" in json.loads(task.stdout)
 
-    def test_name_clash_blocks_and_writes_nothing(
-        self, juju: jubilant.Juju, trino_juju: jubilant.Juju
-    ):
-        """A configured backend named like the alias blocks the unit and leaves the table alone."""
-        juju.config(APP, {"backends": f"- name: {ALIAS}\n  url: {CONFIGURED}\n"})
-        status = juju.wait(lambda s: jubilant.all_blocked(s, APP), error=jubilant.any_error)
-
-        message = status.apps[APP].units[UNIT].workload_status.message
-        assert message == f"backend name conflict: {ALIAS}"
-        wait_for_backends(juju, [_trino_backend(trino_juju, ALIAS)], timeout=30)
-
-    def test_another_alias_resolves_the_clash(
-        self, juju: jubilant.Juju, trino_juju: jubilant.Juju
-    ):
-        """Consuming the offer under another alias leaves the configured backend untouched."""
-        juju.remove_relation(GATEWAY_ENDPOINT, f"{ALIAS}:{CATALOG_ENDPOINT}")
-        juju.wait(
-            lambda s: jubilant.all_active(s, APP) and not s.app_endpoints[ALIAS].relations,
-            error=jubilant.any_error,
-        )
-        trino_juju.wait(
-            lambda s: CATALOG_ENDPOINT not in s.apps[TRINO].relations, error=jubilant.any_error
-        )
-        wait_for_backends(juju, [_backend(ALIAS, CONFIGURED)])
-
-        juju.cli("remove-saas", ALIAS)
-        juju.wait(lambda s: ALIAS not in s.app_endpoints, error=jubilant.any_error)
-        _consume(juju, trino_juju, OTHER_ALIAS)
-        juju.integrate(GATEWAY_ENDPOINT, f"{OTHER_ALIAS}:{CATALOG_ENDPOINT}")
-        juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
-
-        wait_for_backends(
-            juju, [_backend(ALIAS, CONFIGURED), _trino_backend(trino_juju, OTHER_ALIAS)]
-        )
-
     def test_local_and_remote_applications_with_the_same_name_coexist(
         self, juju: jubilant.Juju, trino_juju: jubilant.Juju
     ):
-        """Juju requires an alias for a consumed offer named like a local application."""
+        """A local and a remote application named `trino-k8s` register as separate backends."""
         with pytest.raises(jubilant.CLIError):
             _consume(juju, trino_juju, TRINO)
         juju.integrate(GATEWAY_ENDPOINT, f"{TRINO}:{CATALOG_ENDPOINT}")
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
-        wait_for_backends(
-            juju,
-            [
-                _backend(ALIAS, CONFIGURED),
-                _trino_backend(trino_juju, OTHER_ALIAS),
-                _trino_backend(juju, TRINO),
-            ],
-        )
+        wait_for_backends(juju, [_trino_backend(trino_juju, ALIAS), _trino_backend(juju, TRINO)])

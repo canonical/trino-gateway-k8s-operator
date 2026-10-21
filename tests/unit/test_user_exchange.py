@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from conftest import FakeGateway
 from ops import testing
 
 import constants
@@ -28,7 +29,7 @@ def ctx() -> testing.Context:
 
 
 @pytest.fixture(autouse=True)
-def sync_backends(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+def sync_backends(monkeypatch: pytest.MonkeyPatch, gateway: FakeGateway) -> MagicMock:
     mock = MagicMock()
     monkeypatch.setattr(gateway_api, "sync_backends", mock)
     return mock
@@ -100,7 +101,7 @@ def test_leader_issues_one_user_per_consumer(ctx: testing.Context):
     assert len(passwords) == 2
 
 
-def test_nothing_is_written_to_consumer_relations(ctx: testing.Context):
+def test_nothing_is_written_to_consumers_without_a_ready_workload(ctx: testing.Context):
     consumer = _consumer()
 
     state_out = ctx.run(ctx.on.relation_created(consumer), _state(_peer(), consumer))

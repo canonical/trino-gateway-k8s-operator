@@ -15,7 +15,9 @@ def _info(relation_id: int, app: str, url: str = "trino:8080", catalogs=("b", "a
     """Build the per-relation dict the library returns for a complete relation."""
     return {
         "trino_url": url,
-        "trino_catalogs": [TrinoCatalog(name) for name in catalogs],
+        "trino_catalogs": [
+            c if isinstance(c, TrinoCatalog) else TrinoCatalog(c) for c in catalogs
+        ],
         "trino_credentials_secret_id": "secret:abc",
         "relation_id": relation_id,
         "remote_app": app,
@@ -84,14 +86,15 @@ def test_load_without_relations():
 
 
 def test_load_builds_backend_with_sorted_catalogs():
-    """A complete relation becomes a backend that carries its sorted catalog names."""
-    result, _ = _load([_info(7, "trino-a", "trino:8080")])
+    """A complete relation becomes a backend that carries its catalogs, sorted by name."""
+    hive = TrinoCatalog("b", connector="hive", description="warehouse")
+    result, _ = _load([_info(7, "trino-a", "trino:8080", catalogs=(hive, "a"))])
 
     assert result.backends == [
         RelatedBackend(
             name="trino-a",
             url="http://trino:8080",
-            catalogs=("a", "b"),
+            catalogs=(TrinoCatalog("a"), hive),
             relation_id=7,
             remote_app="trino-a",
         )
@@ -166,6 +169,17 @@ def test_load_skips_relation_with_non_string_catalog_names(caplog: pytest.LogCap
     assert [backend.name for backend in result.backends] == ["trino-b"]
     assert result.skipped == 1
     assert "'trino-a'" in caplog.text
+
+
+def test_load_skips_relation_with_non_string_connector(caplog: pytest.LogCaptureFixture):
+    """A relation advertising a non-string connector is logged and skipped."""
+    caplog.set_level(logging.WARNING)
+    bad = TrinoCatalog("hive", connector=["postgresql"])  # type: ignore[arg-type]
+
+    result, _ = _load([_info(1, "trino-a", catalogs=(bad,)), _info(2, "trino-b")])
+
+    assert [backend.name for backend in result.backends] == ["trino-b"]
+    assert result.skipped == 1
 
 
 def test_load_never_reads_credentials(caplog: pytest.LogCaptureFixture):

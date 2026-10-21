@@ -98,17 +98,22 @@ class GatewayApiClient:
             raise GatewayApiError(f"{method} {path} failed: {e}") from e
 
 
-def sync_backends(client: GatewayApiClient, desired: Iterable[RelatedBackend]) -> None:
+def sync_backends(
+    client: GatewayApiClient,
+    desired: Iterable[RelatedBackend],
+    current: Iterable[GatewayBackend],
+) -> None:
     """Make the gateway's registered backends match `desired`.
 
     Args:
         client: Client for the gateway API.
         desired: The backends the gateway should have.
+        current: The backends the gateway has, as listed by `client.list_backends()`.
 
     Raises:
         GatewayApiError: if the gateway cannot be reached or rejects a change.
     """
-    plan = plan_sync(desired, client.list_backends())
+    plan = plan_sync(desired, current)
     for name in plan.delete:
         logger.info("Deregistering backend %r", name)
         client.delete(name)

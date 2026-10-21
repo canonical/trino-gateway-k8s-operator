@@ -84,14 +84,14 @@ class RelatedBackend:
     Attributes:
         name: Backend name derived from the remote application name.
         url: URL of the Trino application, with the scheme inferred from its port.
-        catalogs: Sorted names of the catalogs the application advertises.
+        catalogs: The catalogs the application advertises, sorted by name.
         relation_id: ID of the relation the data came from.
         remote_app: Name of the remote application.
     """
 
     name: str
     url: str
-    catalogs: tuple[str, ...]
+    catalogs: tuple[TrinoCatalog, ...]
     relation_id: int
     remote_app: str
 
@@ -162,22 +162,21 @@ def normalise_url(trino_url: str) -> str:
     return _check_url(backend_url(trino_url))
 
 
-def _catalog_names(catalogs: list[TrinoCatalog]) -> tuple[str, ...]:
-    """Collect the sorted names of the advertised catalogs.
+def _catalogs(catalogs: list[TrinoCatalog]) -> tuple[TrinoCatalog, ...]:
+    """Check the advertised catalogs and sort them by name.
 
     Args:
         catalogs: The catalogs advertised by the remote application.
 
     Returns:
-        The catalog names in sorted order.
+        The catalogs in name order.
 
     Raises:
-        ValueError: if a catalog name is not a string.
+        ValueError: if a catalog name or connector is not a string.
     """
-    names = [catalog.name for catalog in catalogs]
-    if not all(isinstance(name, str) for name in names):
-        raise ValueError("catalog names must be strings")
-    return tuple(sorted(names))
+    if not all(isinstance(c.name, str) and isinstance(c.connector, str) for c in catalogs):
+        raise ValueError("catalog names and connectors must be strings")
+    return tuple(sorted(catalogs, key=lambda catalog: catalog.name))
 
 
 def load(requirer: TrinoCatalogRequirer, relations: list[ops.Relation]) -> RelatedBackends:
@@ -202,7 +201,7 @@ def load(requirer: TrinoCatalogRequirer, relations: list[ops.Relation]) -> Relat
             validated = _BackendFields(
                 name=backend_name(remote_app), url=backend_url(info["trino_url"])
             )
-            catalogs = _catalog_names(info["trino_catalogs"])
+            catalogs = _catalogs(info["trino_catalogs"])
         except ValueError as e:
             logger.warning(
                 "Skipping backend-trino-catalog relation %r (%r): %r", relation_id, remote_app, e

@@ -28,7 +28,7 @@ variable "channel" {
 }
 
 variable "config" {
-  description = "Charm configuration options passed to the application unchanged. The charm currently has none."
+  description = "Charm configuration options passed to the application unchanged, such as `catalog-exclusions`."
   type        = map(string)
   default     = {}
   nullable    = false

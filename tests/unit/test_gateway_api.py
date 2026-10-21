@@ -30,15 +30,11 @@ def _api(name: str, url: str) -> dict:
 def test_sync_backends_applies_plan():
     """The plan is applied as deletes, then updates, then adds."""
     client = MagicMock(spec=GatewayApiClient)
-    client.list_backends.return_value = [
-        _backend("a", "http://old:8080"),
-        _backend("gone", "http://gone:8080"),
-    ]
+    current = [_backend("a", "http://old:8080"), _backend("gone", "http://gone:8080")]
 
-    sync_backends(client, [A, B])
+    sync_backends(client, [A, B], current)
 
     assert client.method_calls == [
-        call.list_backends(),
         call.delete("gone"),
         call.update(_backend("a", "http://a:8080")),
         call.add(_backend("b", "http://b:8080")),

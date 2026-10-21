@@ -26,3 +26,6 @@ USERNAME_PREFIX = "gw-"
 # Up to 63 characters, starting with a letter or digit.
 BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
 DATABASE_NAME = "trino_gateway"
+# Trino advertises an empty connector for catalogs without a `backend` entry, which says
+# nothing about what the catalog is, so it is not treated as a conflict.
+EMPTY_CONNECTOR_NEVER_CONFLICTS = True

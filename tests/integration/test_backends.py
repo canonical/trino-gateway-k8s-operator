@@ -6,11 +6,18 @@ import time
 import jubilant
 import pytest
 import trino
-from helpers import APP, UNIT, gateway_request, wait_for_backends
+from conftest import DeployTrino
+from helpers import (
+    APP,
+    CATALOG_ENDPOINT,
+    UNIT,
+    gateway_request,
+    relate_upstream,
+    wait_for_backends,
+)
 
 POSTGRESQL = "postgresql-k8s"
 TRINO = "trino-k8s"
-CATALOG_ENDPOINT = "trino-catalog"
 NO_BACKENDS = "no backends related"
 
 
@@ -45,20 +52,26 @@ def _query_through_gateway(juju: jubilant.Juju, query: str, timeout: float = 600
 
 @pytest.mark.incremental
 class TestBackends:
-    def test_deploy(self, charm_path: str, resource_images: dict[str, str], juju: jubilant.Juju):
+    def test_deploy(
+        self,
+        charm_path: str,
+        resource_images: dict[str, str],
+        deploy_trino: DeployTrino,
+        juju: jubilant.Juju,
+    ):
         """The gateway, PostgreSQL and Trino deploy and the gateway reports no backends."""
         juju.model_config({"update-status-hook-interval": "30s"})
         juju.deploy(charm_path, app=APP, resources=resource_images)
         juju.deploy(POSTGRESQL, channel="14/stable", trust=True)
-        juju.deploy(TRINO, channel="latest/edge", trust=True, config={"charm-function": "all"})
+        deploy_trino(juju, TRINO)
         juju.integrate(APP, POSTGRESQL)
         status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
         assert status.apps[APP].units[UNIT].workload_status.message == NO_BACKENDS
 
     def test_related_backend_is_registered(self, juju: jubilant.Juju):
-        """A Trino application related over `backend-trino-catalog` is registered."""
-        juju.integrate(f"{APP}:backend-trino-catalog", f"{TRINO}:{CATALOG_ENDPOINT}")
+        """A Trino application related over both endpoints is registered."""
+        relate_upstream(juju, APP, TRINO)
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
         wait_for_backends(juju, [_expected_backend(juju)])

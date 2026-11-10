@@ -28,7 +28,7 @@ application.
 | `endpoint_bindings` | `set(object({ space = string, endpoint = optional(string) }))` | `[]` | No | Network space bindings; omitted `endpoint` binds the application default. |
 | `expose` | `object({ cidrs = optional(string), endpoints = optional(string), spaces = optional(string) })` | `null` | Yes | `null` omits exposure; `{}` exposes all endpoints. |
 | `model_uuid` | `string` | None | No | Target Juju model UUID. Required. |
-| `offered_endpoints` | `list(string)` | `[]` | No | Provided endpoints to offer. Must be empty while the charm provides none. |
+| `offered_endpoints` | `list(string)` | `[]` | No | Provided endpoints to offer: `trino-catalog` and `trino-gateway-integration`. |
 | `resources` | `map(string)` | `{}` | No | Resource/image overrides, including `trino-gateway-image`. Empty uses resources bundled with the selected charm revision. |
 | `revision` | `number` | `null` | Yes | Charm revision. Null selects the latest revision on `channel`. |
 | `storage_directives` | `map(string)` | `{}` | No | Juju storage directives for the application. |
@@ -40,8 +40,8 @@ application.
 | Name | Description |
 | --- | --- |
 | `application` | The full `juju_application` resource. |
-| `offers` | Map keyed by offered endpoint: `{ kind = "offer", url = <offer URL> }`. Empty while the charm provides no endpoints. |
-| `provides` | Map of provided endpoint objects. Empty while the charm declares no provided endpoints. |
+| `offers` | Map keyed by offered endpoint: `{ kind = "offer", url = <offer URL> }`. Empty unless `offered_endpoints` is set. |
+| `provides` | Map of provided endpoint objects, keyed by endpoint: `trino_catalog` (`trino_catalog` interface) and `trino_gateway_integration` (`trino_gateway_integration` interface). |
 | `requires` | Map of required endpoint objects, keyed by endpoint: `postgresql` (`postgresql_client` interface) and `backend_trino_catalog` (`trino_catalog` interface, optional). |
 
 ## Resource overrides

@@ -1,7 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Which users each upstream Trino confirmed or refused, and which backend it corresponds to."""
+"""Track which users each upstream Trino confirmed or refused, and match upstreams to backends.
+
+`core.policy` reads this per-pair confirmation state to decide which backends are registered and
+which consumers are published.
+"""
 
 import logging
 from collections import defaultdict

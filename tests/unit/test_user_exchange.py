@@ -139,7 +139,7 @@ def test_new_leader_reuses_existing_user(ctx: testing.Context):
     assert _user_secret(state_out, consumer.id).tracked_content["password"] == "kept"
 
 
-def test_lost_secret_is_recreated_under_the_same_username(ctx: testing.Context):
+def test_missing_secret_is_recreated_under_the_same_username(ctx: testing.Context):
     consumer = _consumer()
     state = _state(_peer({consumer.id: "gw-existing-superset-1"}), consumer)
 

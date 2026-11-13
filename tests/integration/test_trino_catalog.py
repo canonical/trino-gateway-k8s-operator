@@ -73,7 +73,7 @@ def _credentials(juju: jubilant.Juju, data: dict[str, str]) -> tuple[str, str]:
     return content["username"], content["password"]
 
 
-def _query(juju: jubilant.Juju, credentials: tuple[str, str]) -> list:
+def _query(juju: jubilant.Juju, credentials: tuple[str, str], timeout: float = 120) -> list:
     """Run a query through the gateway Service as the consumer's user.
 
     Over plain HTTP, Trino refuses passwords and trusts the username, and the gateway rejects
@@ -85,8 +85,11 @@ def _query(juju: jubilant.Juju, credentials: tuple[str, str]) -> list:
     request = urllib.request.Request(
         f"{base}/v1/statement", data=QUERY.encode(), headers=headers, method="POST"
     )
+    deadline = time.monotonic() + timeout
     rows = []
     while True:
+        if time.monotonic() > deadline:
+            raise AssertionError(f"query did not finish within {timeout}s")
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
             body = json.loads(response.read())
         if "error" in body:
@@ -170,16 +173,15 @@ class TestTrinoCatalog:
 
         relate_upstream(juju, APP, TRINO_B)
         deadline = time.monotonic() + 15 * 60
-        queries = 0
-        while backend_names(juju) != {TRINO_A, TRINO_B}:
-            assert time.monotonic() < deadline, "trino-b was never registered"
+        while True:
             assert _query(juju, credentials) == [[1]]
-            queries += 1
+            if backend_names(juju) == {TRINO_A, TRINO_B}:
+                break
+            assert time.monotonic() < deadline, "trino-b was never registered"
             time.sleep(5)
         for _ in range(10):
             assert _query(juju, credentials) == [[1]]
 
-        assert queries > 0
         assert _consumer_data(juju) == before
 
     def test_upstream_without_integration_is_never_registered(self, juju: jubilant.Juju):

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from conftest import FakeGateway
 from ops import testing
 
 import constants
@@ -28,7 +29,7 @@ def ctx() -> testing.Context:
 
 
 @pytest.fixture(autouse=True)
-def sync_backends(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+def sync_backends(monkeypatch: pytest.MonkeyPatch, gateway: FakeGateway) -> MagicMock:
     mock = MagicMock()
     monkeypatch.setattr(gateway_api, "sync_backends", mock)
     return mock
@@ -100,7 +101,7 @@ def test_leader_issues_one_user_per_consumer(ctx: testing.Context):
     assert len(passwords) == 2
 
 
-def test_nothing_is_written_to_consumer_relations(ctx: testing.Context):
+def test_nothing_is_written_to_consumers_without_a_ready_workload(ctx: testing.Context):
     consumer = _consumer()
 
     state_out = ctx.run(ctx.on.relation_created(consumer), _state(_peer(), consumer))
@@ -138,7 +139,7 @@ def test_new_leader_reuses_existing_user(ctx: testing.Context):
     assert _user_secret(state_out, consumer.id).tracked_content["password"] == "kept"
 
 
-def test_lost_secret_is_recreated_under_the_same_username(ctx: testing.Context):
+def test_missing_secret_is_recreated_under_the_same_username(ctx: testing.Context):
     consumer = _consumer()
     state = _state(_peer({consumer.id: "gw-existing-superset-1"}), consumer)
 

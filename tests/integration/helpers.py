@@ -10,6 +10,14 @@ import jubilant
 
 APP = "trino-gateway-k8s"
 UNIT = f"{APP}/0"
+CATALOG_ENDPOINT = "trino-catalog"
+INTEGRATION_ENDPOINT = "trino-gateway-integration"
+
+
+def relate_upstream(juju: jubilant.Juju, gateway: str, trino: str) -> None:
+    """Relate a Trino application to the gateway over both endpoints registration needs."""
+    juju.integrate(f"{gateway}:backend-trino-catalog", f"{trino}:{CATALOG_ENDPOINT}")
+    juju.integrate(f"{gateway}:{INTEGRATION_ENDPOINT}", f"{trino}:{INTEGRATION_ENDPOINT}")
 
 
 def gateway_request(juju: jubilant.Juju, path: str, body: dict | None = None) -> bytes:
@@ -22,6 +30,14 @@ def gateway_request(juju: jubilant.Juju, path: str, body: dict | None = None) ->
     )
     with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
         return response.read()
+
+
+def backend_names(juju: jubilant.Juju) -> set[str] | None:
+    """List the names of the gateway's backends, or None if the gateway cannot be reached."""
+    try:
+        return {b["name"] for b in json.loads(gateway_request(juju, "/gateway/backend/all"))}
+    except (urllib.error.URLError, ConnectionError):
+        return None
 
 
 def wait_for_backends(juju: jubilant.Juju, expected: list[dict], timeout: float = 600) -> None:

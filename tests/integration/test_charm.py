@@ -20,14 +20,15 @@ PEBBLE = "PEBBLE_SOCKET=/charm/containers/trino-gateway/pebble.socket /charm/bin
 
 def _service_state(juju: jubilant.Juju, timeout: float = 120) -> str:
     deadline = time.monotonic() + timeout
-    while True:
+    error = None
+    while time.monotonic() < deadline:
         try:
             output = juju.ssh(UNIT, f"{PEBBLE} services trino-gateway")
             return output.splitlines()[1].split()[2]
-        except (jubilant.CLIError, IndexError):
-            if time.monotonic() > deadline:
-                raise
+        except (jubilant.CLIError, IndexError) as e:
+            error = e
             time.sleep(5)
+    raise AssertionError(f"service state unavailable within {timeout}s") from error
 
 
 def _relation_user(juju: jubilant.Juju) -> dict[str, str]:
@@ -39,15 +40,16 @@ def _relation_user(juju: jubilant.Juju) -> dict[str, str]:
 
 def _wait_for_http_ok(url: str, timeout: float = 180) -> None:
     deadline = time.monotonic() + timeout
-    while True:
+    error = None
+    while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310
                 assert response.status == 200
                 return
-        except (urllib.error.URLError, ConnectionError):
-            if time.monotonic() > deadline:
-                raise
+        except (urllib.error.URLError, ConnectionError) as e:
+            error = e
             time.sleep(5)
+    raise AssertionError(f"{url} not reachable within {timeout}s") from error
 
 
 @pytest.mark.incremental

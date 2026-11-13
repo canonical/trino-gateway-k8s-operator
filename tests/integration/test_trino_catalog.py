@@ -87,9 +87,7 @@ def _query(juju: jubilant.Juju, credentials: tuple[str, str], timeout: float = 1
     )
     deadline = time.monotonic() + timeout
     rows = []
-    while True:
-        if time.monotonic() > deadline:
-            raise AssertionError(f"query did not finish within {timeout}s")
+    while time.monotonic() < deadline:
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
             body = json.loads(response.read())
         if "error" in body:
@@ -100,20 +98,22 @@ def _query(juju: jubilant.Juju, credentials: tuple[str, str], timeout: float = 1
             return rows
         request = urllib.request.Request(base + urlsplit(next_uri).path, headers=headers)
         time.sleep(0.2)
+    raise AssertionError(f"query did not finish within {timeout}s")
 
 
 def _wait_for_query(juju: jubilant.Juju, credentials: tuple[str, str], timeout: float = 600):
     """Retry the query until the gateway reports a healthy backend for it."""
     deadline = time.monotonic() + timeout
-    while True:
+    error = None
+    while time.monotonic() < deadline:
         try:
             return _query(juju, credentials)
         except (urllib.error.URLError, ConnectionError, AssertionError) as e:
             if isinstance(e, urllib.error.HTTPError):
                 e.close()
-            if time.monotonic() > deadline:
-                raise
+            error = e
             time.sleep(10)
+    raise AssertionError(f"query never succeeded within {timeout}s") from error
 
 
 @pytest.mark.incremental
@@ -173,12 +173,12 @@ class TestTrinoCatalog:
 
         relate_upstream(juju, APP, TRINO_B)
         deadline = time.monotonic() + 15 * 60
-        while True:
+        registered = False
+        while not registered and time.monotonic() < deadline:
             assert _query(juju, credentials) == [[1]]
-            if backend_names(juju) == {TRINO_A, TRINO_B}:
-                break
-            assert time.monotonic() < deadline, "trino-b was never registered"
+            registered = backend_names(juju) == {TRINO_A, TRINO_B}
             time.sleep(5)
+        assert registered, "trino-b was never registered"
         for _ in range(10):
             assert _query(juju, credentials) == [[1]]
 

@@ -7,6 +7,18 @@ on:
   push:
     branches:
       - main
+    # Same list as the other data-mesh charms; none of these files change the
+    # charm or rock, so there is nothing to publish.
+    paths-ignore:
+      - "**.md"
+      - "**.rst"
+      - "**.custom_wordlist.txt"
+      - LICENSE
+      - apm.yml
+      - apm.lock.yaml
+      - .agents/**
+      - .github/agents/**
+      - .github/instructions/**
 
 jobs:
   publish:

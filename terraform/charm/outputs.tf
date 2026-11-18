@@ -7,7 +7,7 @@ output "application" {
 }
 
 output "offers" {
-  description = "Offer objects for each requested offered endpoint, keyed by endpoint name."
+  description = "Offers keyed by offered endpoint, each `{ kind = \"offer\", url = <offer URL> }`. Empty unless `offered_endpoints` is set."
   value = {
     for endpoint, offer in juju_offer.this : endpoint => {
       kind = "offer"
@@ -17,7 +17,7 @@ output "offers" {
 }
 
 output "provides" {
-  description = "Provided endpoint objects for cross-charm integration."
+  description = "Provided endpoints keyed by name, each `{ kind = \"endpoint\", name = <application name>, endpoint = <relation endpoint> }`: `trino_catalog` (`trino_catalog` interface) and `trino_gateway_integration` (`trino_gateway_integration` interface)."
   value = {
     for key, endpoint in local.provided_endpoints : key => {
       kind     = "endpoint"
@@ -28,7 +28,7 @@ output "provides" {
 }
 
 output "requires" {
-  description = "Required endpoint objects for cross-charm integration."
+  description = "Required endpoints keyed by name, each `{ kind = \"endpoint\", name = <application name>, endpoint = <relation endpoint> }`: `postgresql` (`postgresql_client` interface) and `backend_trino_catalog` (`trino_catalog` interface, optional)."
   value = {
     for key, endpoint in local.required_endpoints : key => {
       kind     = "endpoint"

@@ -42,6 +42,25 @@ run "basic_deploy" {
     condition     = output.provides.trino_gateway_integration.endpoint == "trino-gateway-integration" && output.provides.trino_gateway_integration.name == "trino-gateway-k8s"
     error_message = "trino_gateway_integration provider did not reference the application endpoint"
   }
+
+  assert {
+    condition     = length(output.application.expose) == 1
+    error_message = "the application should be exposed by default"
+  }
+}
+
+run "expose_disabled" {
+  command = plan
+
+  variables {
+    model_uuid = run.setup.model_uuid
+    expose     = null
+  }
+
+  assert {
+    condition     = length(output.application.expose) == 0
+    error_message = "a null expose should leave the application unexposed"
+  }
 }
 
 run "offered_endpoints" {

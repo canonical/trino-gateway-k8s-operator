@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import ops
 import pytest
+from conftest import FakeGateway
 from ops import testing
 
 import constants
@@ -30,6 +31,11 @@ ROCK_LAYER = ops.pebble.Layer(
 @pytest.fixture
 def ctx() -> testing.Context:
     return testing.Context(TrinoGatewayK8SOperatorCharm)
+
+
+@pytest.fixture(autouse=True)
+def _fake_gateway(gateway: FakeGateway) -> FakeGateway:
+    return gateway
 
 
 def _container(**kwargs) -> testing.Container:
@@ -229,7 +235,7 @@ def _ready_state(leader: bool = True) -> testing.State:
     return testing.State(
         leader=leader,
         containers={_container()},
-        relations={_relation(secret)},
+        relations={_relation(secret), testing.PeerRelation(constants.PEER_RELATION)},
         secrets={secret},
     )
 
@@ -254,10 +260,20 @@ def _trino_relation(app: str = "trino-b", url: str = "trino-b:8080", **data) -> 
     )
 
 
+def _integration_for(relation: testing.Relation) -> testing.Relation:
+    """Build the `trino-gateway-integration` relation of a Trino application."""
+    return testing.Relation(
+        constants.TRINO_GATEWAY_INTEGRATION_RELATION,
+        remote_app_name=relation.remote_app_name,
+        remote_app_data={"trino_url": relation.remote_app_data.get("trino_url", "")},
+    )
+
+
 def _state_with(*relations: testing.Relation, leader: bool = True):
-    """Build a ready state with extra relations added."""
+    """Build a ready state with Trino applications related over both of their endpoints."""
     state = _ready_state(leader=leader)
-    return dataclasses.replace(state, relations={*state.relations, *relations})
+    integrations = [_integration_for(r) for r in relations if r.remote_app_data.get("trino_url")]
+    return dataclasses.replace(state, relations={*state.relations, *relations, *integrations})
 
 
 def test_leader_syncs_related_backends(ctx: testing.Context, sync_backends: MagicMock):

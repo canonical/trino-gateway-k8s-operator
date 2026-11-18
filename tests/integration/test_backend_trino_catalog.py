@@ -3,12 +3,11 @@
 
 import jubilant
 import pytest
-from helpers import APP, UNIT, wait_for_backends
+from conftest import DeployTrino
+from helpers import APP, CATALOG_ENDPOINT, UNIT, relate_upstream, wait_for_backends
 
 POSTGRESQL = "postgresql-k8s"
-TRINO = "trino-k8s"
 TRINO_APPS = ("trino-a", "trino-b")
-CATALOG_ENDPOINT = "trino-catalog"
 NO_BACKENDS = "no backends related"
 
 
@@ -29,15 +28,19 @@ def _expected(juju: jubilant.Juju, apps: tuple[str, ...]) -> list[dict]:
 class TestBackendTrinoCatalog:
     """Trino applications related over `backend-trino-catalog` are registered as backends."""
 
-    def test_deploy(self, charm_path: str, resource_images: dict[str, str], juju: jubilant.Juju):
+    def test_deploy(
+        self,
+        charm_path: str,
+        resource_images: dict[str, str],
+        deploy_trino: DeployTrino,
+        juju: jubilant.Juju,
+    ):
         """The gateway, PostgreSQL and two Trino applications deploy and settle."""
         juju.model_config({"update-status-hook-interval": "30s"})
         juju.deploy(charm_path, app=APP, resources=resource_images)
         juju.deploy(POSTGRESQL, channel="14/stable", trust=True, config={"profile": "testing"})
         for app in TRINO_APPS:
-            juju.deploy(
-                TRINO, app=app, channel="latest/edge", trust=True, config={"charm-function": "all"}
-            )
+            deploy_trino(juju, app)
         juju.integrate(APP, POSTGRESQL)
         status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
@@ -46,7 +49,7 @@ class TestBackendTrinoCatalog:
     def test_related_trino_applications_are_registered(self, juju: jubilant.Juju):
         """Both related Trino applications appear as backends in the adhoc group."""
         for app in TRINO_APPS:
-            juju.integrate(f"{APP}:backend-trino-catalog", f"{app}:{CATALOG_ENDPOINT}")
+            relate_upstream(juju, APP, app)
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
         wait_for_backends(juju, _expected(juju, TRINO_APPS))

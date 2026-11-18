@@ -6,3 +6,7 @@
 
 class MalformedIssuedUsersError(Exception):
     """The issued-user index in the peer relation cannot be parsed."""
+
+
+class InvalidConfigError(Exception):
+    """The charm configuration is invalid."""

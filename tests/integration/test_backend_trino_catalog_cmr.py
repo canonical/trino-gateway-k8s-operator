@@ -6,12 +6,19 @@ import shlex
 
 import jubilant
 import pytest
-from helpers import APP, UNIT, gateway_request, wait_for_backends
+from conftest import DeployTrino
+from helpers import (
+    APP,
+    CATALOG_ENDPOINT,
+    INTEGRATION_ENDPOINT,
+    UNIT,
+    gateway_request,
+    relate_upstream,
+    wait_for_backends,
+)
 
 POSTGRESQL = "postgresql-k8s"
 TRINO = "trino-k8s"
-CATALOG_ENDPOINT = "trino-catalog"
-GATEWAY_ENDPOINT = f"{APP}:backend-trino-catalog"
 NO_BACKENDS = "no backends related"
 # The application, offer and alias differ so the test shows which one names the backend.
 OFFER = "trino-offer"
@@ -51,6 +58,7 @@ class TestBackendTrinoCatalogCrossModel:
         self,
         charm_path: str,
         resource_images: dict[str, str],
+        deploy_trino: DeployTrino,
         juju: jubilant.Juju,
         trino_juju: jubilant.Juju,
     ):
@@ -60,9 +68,7 @@ class TestBackendTrinoCatalogCrossModel:
         juju.deploy(POSTGRESQL, channel="14/stable", trust=True, config={"profile": "testing"})
         juju.integrate(APP, POSTGRESQL)
         for model in (juju, trino_juju):
-            model.deploy(
-                TRINO, channel="latest/edge", trust=True, config={"charm-function": "all"}
-            )
+            deploy_trino(model, TRINO)
         trino_juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
         status = juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=30 * 60)
 
@@ -72,9 +78,9 @@ class TestBackendTrinoCatalogCrossModel:
         self, juju: jubilant.Juju, trino_juju: jubilant.Juju
     ):
         """The alias of the consumed offer names the backend, not the application or offer."""
-        trino_juju.offer(TRINO, endpoint=CATALOG_ENDPOINT, name=OFFER)
+        trino_juju.offer(TRINO, endpoint=[CATALOG_ENDPOINT, INTEGRATION_ENDPOINT], name=OFFER)
         _consume(juju, trino_juju, ALIAS)
-        juju.integrate(GATEWAY_ENDPOINT, f"{ALIAS}:{CATALOG_ENDPOINT}")
+        relate_upstream(juju, APP, ALIAS)
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
         wait_for_backends(juju, [_trino_backend(trino_juju, ALIAS)])
@@ -96,7 +102,7 @@ class TestBackendTrinoCatalogCrossModel:
         """A local and a remote application named `trino-k8s` register as separate backends."""
         with pytest.raises(jubilant.CLIError):
             _consume(juju, trino_juju, TRINO)
-        juju.integrate(GATEWAY_ENDPOINT, f"{TRINO}:{CATALOG_ENDPOINT}")
+        relate_upstream(juju, APP, TRINO)
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
         wait_for_backends(juju, [_trino_backend(trino_juju, ALIAS), _trino_backend(juju, TRINO)])

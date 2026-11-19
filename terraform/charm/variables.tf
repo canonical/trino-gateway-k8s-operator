@@ -42,7 +42,7 @@ variable "constraints" {
 }
 
 variable "endpoint_bindings" {
-  description = "Network space bindings for the application's endpoints."
+  description = "Network space bindings for the application's endpoints. An entry without `endpoint` binds the application default."
   type = set(object({
     space    = string
     endpoint = optional(string)
@@ -52,13 +52,13 @@ variable "endpoint_bindings" {
 }
 
 variable "expose" {
-  description = "Exposure configuration. Null omits exposure; an empty object exposes all endpoints."
+  description = "Exposure configuration. The default empty object exposes all endpoints; null leaves the application unexposed."
   type = object({
     cidrs     = optional(string)
     endpoints = optional(string)
     spaces    = optional(string)
   })
-  default  = null
+  default  = {}
   nullable = true
 }
 
@@ -109,7 +109,7 @@ variable "trust" {
 }
 
 variable "units" {
-  description = "Number of application units to deploy."
+  description = "Number of application units to deploy. Must be at least 1."
   type        = number
   default     = 1
   nullable    = false

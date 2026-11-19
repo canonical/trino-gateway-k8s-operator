@@ -1,0 +1,26 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: Update Terraform documentation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**/terraform/**'
+      - '.github/workflows/generate_terraform_docs.yaml'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  terraform-docs:
+    name: Update Terraform documentation
+    uses: canonical/operator-workflows/.github/workflows/generate_terraform_docs.yaml@0ad5fa95ddbd34f7fa6a70f552269a4090f35fa3 # main
+    secrets: inherit
+    with:
+      terraform-directory: terraform/charm
+      # Auto-merge is pending a team decision; docs PRs go through normal review until then.
+      auto-merge: false

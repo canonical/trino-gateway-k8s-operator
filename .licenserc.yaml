@@ -16,6 +16,7 @@ header:
     - '**/*.json'
     - '**/*.md'
     - '**/*.txt'
+    - '**/MAJOR_VERSION'
     - '.gitignore'
     - '.jujuignore'
     - '.licenserc.yaml'

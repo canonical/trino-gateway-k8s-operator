@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from conftest import FakeGateway
+from conftest import FakeGateway, latest_content
 from ops import testing
 
 import constants
@@ -148,6 +148,69 @@ def test_missing_secret_is_recreated_under_the_same_username(ctx: testing.Contex
     secret = _user_secret(state_out, consumer.id)
     assert secret.tracked_content["username"] == "gw-existing-superset-1"
     assert secret.tracked_content["password"]
+
+
+def _stale_secret(relation: testing.Relation, username: str) -> testing.Secret:
+    """Build the secret Juju leaves behind when it saves one only partly."""
+    return testing.Secret(
+        {"username": username, "password": "never-readable"},
+        owner="app",
+        label=f"{constants.USER_SECRET_LABEL_PREFIX}{relation.id}",
+    )
+
+
+def test_unreadable_secret_is_replaced_under_the_same_username(
+    ctx: testing.Context,
+    unreadable_revisions: set[tuple[str, int]],
+    caplog: pytest.LogCaptureFixture,
+):
+    """A secret whose label exists but whose content cannot be read gets new content."""
+    consumer, upstream = _consumer(), _upstream()
+    stale = _stale_secret(consumer, _username(consumer))
+    unreadable_revisions.add((stale.id, 1))
+    state = _state(_peer(), consumer, upstream, secrets=[stale])
+
+    with caplog.at_level(logging.WARNING):
+        state_out = ctx.run(ctx.on.update_status(), state)
+
+    secret = _user_secret(state_out, consumer.id)
+    assert secret.id == stale.id
+    assert latest_content(secret)["username"] == _username(consumer)
+    assert latest_content(secret)["password"] not in ("", "never-readable")
+    assert _index(state_out) == {str(consumer.id): _username(consumer)}
+    assert _requested(state_out, upstream) == {_username(consumer): stale.id}
+    assert f"trino-catalog relation {consumer.id}" in caplog.text
+
+
+def test_replaced_secret_keeps_its_password_on_later_reconciles(
+    ctx: testing.Context, unreadable_revisions: set[tuple[str, int]]
+):
+    """The leader still tracks the unreadable revision, so it must not replace it again."""
+    consumer = _consumer()
+    stale = _stale_secret(consumer, _username(consumer))
+    unreadable_revisions.add((stale.id, 1))
+    first = ctx.run(ctx.on.update_status(), _state(_peer(), consumer, secrets=[stale]))
+    password = latest_content(_user_secret(first, consumer.id))["password"]
+
+    second = ctx.run(ctx.on.update_status(), first)
+    third = ctx.run(ctx.on.update_status(), second)
+
+    for state in (second, third):
+        assert latest_content(_user_secret(state, consumer.id))["password"] == password
+
+
+def test_unreadable_secret_of_a_removed_consumer_is_removed(
+    ctx: testing.Context, unreadable_revisions: set[tuple[str, int]]
+):
+    consumer = _consumer()
+    stale = _stale_secret(consumer, _username(consumer))
+    unreadable_revisions.add((stale.id, 1))
+    state = _state(_peer({consumer.id: _username(consumer)}), consumer, secrets=[stale])
+
+    state_out = ctx.run(ctx.on.relation_broken(consumer), state)
+
+    assert _index(state_out) == {}
+    assert not state_out.secrets
 
 
 def test_removed_consumer_loses_its_user_everywhere(ctx: testing.Context):

@@ -43,17 +43,43 @@ a worker application to the gateway is not supported. It must also be a `trino-k
 that provides `trino-gateway-integration`. A Trino application related over
 `backend-trino-catalog` only is never registered.
 
-For a Trino application in another model, offer both endpoints, consume the offer and integrate
-with the resulting application:
+For a Trino application in another model, each side offers one endpoint. The Trino application
+offers `trino-catalog`, which the gateway's model consumes:
 
 ```shell
-juju offer trino-model.trino-k8s:trino-catalog,trino-gateway-integration trino-k8s
-juju consume trino-model.trino-k8s trino-a
-juju integrate trino-gateway-k8s:backend-trino-catalog trino-a:trino-catalog
-juju integrate trino-gateway-k8s:trino-gateway-integration trino-a:trino-gateway-integration
+juju offer trino-model.trino-k8s:trino-catalog trino-k8s
+juju consume -m gateway-model trino-model.trino-k8s trino-a
+juju integrate -m gateway-model trino-gateway-k8s:backend-trino-catalog trino-a:trino-catalog
 ```
 
-The two relations are matched by the address the Trino application publishes on both. The
+The gateway offers `trino-gateway-integration`, which the Trino application's model consumes:
+
+```shell
+juju offer gateway-model.trino-gateway-k8s:trino-gateway-integration trino-gateway
+juju consume -m trino-model gateway-model.trino-gateway trino-gateway
+juju integrate -m trino-model trino-k8s:trino-gateway-integration trino-gateway:trino-gateway-integration
+```
+
+For a Trino application on another controller, prefix the offer paths and models with the
+controller name, for example `juju consume -m trino-controller:trino-model
+gateway-controller:admin/gateway-model.trino-gateway trino-gateway`.
+
+The other direction, where the gateway's model consumes `trino-gateway-integration` from the
+Trino application's model, is not supported. Juju does not let the gateway share its consumer
+secrets with an application consumed from an offer, so once a consumer exists every gateway
+hook fails with `sharing consumer secrets across a cross model relation not supported`.
+
+Across controllers, the Trino application's pods read the consumer secrets from the gateway
+model's secret backend, so they must be able to reach it. Otherwise the Trino application never
+confirms the users, and consumers stay `waiting for publication`. For example, the default
+secret backend of a MicroK8s model uses the API server address `127.0.0.1:16443`, which pods
+cannot reach. A Kubernetes secret backend whose endpoint the pods can reach works, as
+described in [Manage secret backends](https://documentation.ubuntu.com/juju/3.6/howto/manage-secret-backends/).
+Set the gateway model's `secret-backend` before relating any consumer: changing it moves the
+model's existing secrets to the new backend.
+
+The two relations are matched by the address the Trino application publishes on both, not by
+application name. The
 charm keeps the gateway's registered backends identical to the related applications it
 admits, as described in [Connect consumers](#connect-consumers). Backends added, changed or
 removed through the gateway's API are reverted. All backends are
@@ -63,7 +89,7 @@ health check (`/v1/info`). With no related Trino applications, the unit reports
 restarts, the backend list may only converge on the following `update-status` hook.
 
 - The backend is named after the related application, which for an offer is the name given to
-  `juju consume`. A name longer than 63 characters is shortened and given a hash suffix. If a name is still not a valid backend name, the relation adds no backend and
+  `juju consume` in the gateway's model, such as `trino-a` above. A name longer than 63 characters is shortened and given a hash suffix. If a name is still not a valid backend name, the relation adds no backend and
   is reported as not ready.
 - The backend URL is inferred from the address the Trino application advertises: HTTPS when the
   port is `443`, HTTP otherwise.

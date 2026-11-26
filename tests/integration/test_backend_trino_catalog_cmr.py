@@ -23,6 +23,8 @@ NO_BACKENDS = "no backends related"
 # The application, offer and alias differ so the test shows which one names the backend.
 OFFER = "trino-offer"
 ALIAS = "trino-remote"
+GATEWAY_OFFER = "gateway-offer"
+GATEWAY_ALIAS = "gateway-remote"
 FETCH_SCRIPT = (
     "import sys, urllib.request; "
     "print(urllib.request.urlopen(sys.argv[1], timeout=10).read().decode())"
@@ -44,6 +46,16 @@ def _consume(juju: jubilant.Juju, trino_juju: jubilant.Juju, alias: str) -> None
     juju.consume(f"{trino_juju.model}.{OFFER}", alias)
 
 
+def _relate_cross_model(juju: jubilant.Juju, trino_juju: jubilant.Juju, alias: str) -> None:
+    """Relate the remote Trino in the supported direction: each side offers one endpoint."""
+    juju.integrate(f"{APP}:backend-trino-catalog", f"{alias}:{CATALOG_ENDPOINT}")
+    juju.offer(APP, endpoint=INTEGRATION_ENDPOINT, name=GATEWAY_OFFER)
+    trino_juju.consume(f"{juju.model}.{GATEWAY_OFFER}", GATEWAY_ALIAS)
+    trino_juju.integrate(
+        f"{TRINO}:{INTEGRATION_ENDPOINT}", f"{GATEWAY_ALIAS}:{INTEGRATION_ENDPOINT}"
+    )
+
+
 @pytest.fixture(scope="module")
 def trino_juju(juju_factory) -> jubilant.Juju:
     """Create the model that hosts the Trino application and its offer."""
@@ -52,7 +64,11 @@ def trino_juju(juju_factory) -> jubilant.Juju:
 
 @pytest.mark.incremental
 class TestBackendTrinoCatalogCrossModel:
-    """Trino applications related across models are registered under their consumed alias."""
+    """Trino applications related across models are registered under their consumed alias.
+
+    Trino offers `trino-catalog` and the gateway offers `trino-gateway-integration`, as the
+    README documents.
+    """
 
     def test_deploy(
         self,
@@ -78,9 +94,9 @@ class TestBackendTrinoCatalogCrossModel:
         self, juju: jubilant.Juju, trino_juju: jubilant.Juju
     ):
         """The alias of the consumed offer names the backend, not the application or offer."""
-        trino_juju.offer(TRINO, endpoint=[CATALOG_ENDPOINT, INTEGRATION_ENDPOINT], name=OFFER)
+        trino_juju.offer(TRINO, endpoint=CATALOG_ENDPOINT, name=OFFER)
         _consume(juju, trino_juju, ALIAS)
-        relate_upstream(juju, APP, ALIAS)
+        _relate_cross_model(juju, trino_juju, ALIAS)
         juju.wait(lambda s: jubilant.all_active(s, APP), error=jubilant.any_error)
 
         wait_for_backends(juju, [_trino_backend(trino_juju, ALIAS)])

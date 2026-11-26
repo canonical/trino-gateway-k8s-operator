@@ -137,6 +137,12 @@ To never take service away from consumers that already work, the gateway follows
 - A registered Trino application that withdraws or refuses a published consumer's user stays
   registered while it still confirms at least one published consumer. That consumer loses the
   application's catalogs, and the gap is reported in the status.
+- A registered Trino application whose catalogs come to conflict, such as after a change to
+  its `catalog-config`, stays registered and keeps receiving queries. Queries routed to it that
+  use a conflicting catalog run against its own connector, so they fail or read other data.
+- For a conflicting catalog, consumers are given the catalog of the registered application
+  whose name sorts first among those that give it a connector. That can be the application
+  that introduced the conflict.
 - A consumer must publish its `app_name`, as consumers using the `trino_catalog` library do.
 
 The leader unit reports progress in its status:
@@ -147,10 +153,12 @@ The leader unit reports progress in its status:
 | Active `N consumers waiting for publication` | Consumers that have not been published yet. |
 | Active `N confirmation gaps` | Registered applications that have not confirmed a published consumer. |
 | Blocked `N users refused by M upstreams: <reasons>` | A Trino application refused users. Each reason is an operator error, such as a `gw-*` user configured on Trino, or a bug. |
-| Blocked `N catalog conflicts between upstreams` | Catalogs with the same name use different connectors on different applications. Align their `catalog-config`. |
+| Blocked `N catalog conflicts between upstreams` | Catalogs with the same name use different connectors on different applications. A new application is held back, but a registered one keeps receiving queries, and those that use the catalog fail. Align their `catalog-config` promptly. |
 | Blocked `invalid catalog-exclusions: <error>` | The option is not valid YAML. |
 
-Blocked does not mean the gateway is down: consumers that already work keep working.
+Blocked does not mean the gateway is down: it keeps routing queries to every registered
+application. Whether consumers that already work keep working depends on the cause: a catalog
+conflict on a registered application makes some of their queries fail.
 
 ### Exclude catalogs
 
@@ -174,7 +182,8 @@ Excluded catalogs are only hidden from the relation data: a consumer can still q
 - Catalogs with the same name on different Trino applications are treated as the same data.
   Only their connectors are compared, and a catalog without a known connector (no `backend`
   entry in `catalog-config`) never conflicts. A connector conflict holds back a new
-  application rather than changing what published consumers see.
+  application, but does not take a registered application out of service, as described in
+  [Connect consumers](#connect-consumers).
 - Over plain HTTP, Trino trusts the username and ignores the password, and consumers such as
   Superset and DataHub leave the password out unless the port is `443`. The credentials only
   take effect once both the gateway and Trino are reached over HTTPS; mixing HTTP and HTTPS

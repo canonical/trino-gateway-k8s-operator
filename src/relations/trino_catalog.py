@@ -9,6 +9,7 @@ through the `trino_catalog` charm library. The consumer's `app_name` selects its
 exclusions.
 """
 
+import logging
 import secrets
 
 import ops
@@ -20,6 +21,8 @@ _APP_NAME_KEY = "app_name"
 _SECRET_ID_KEY = "trino_credentials_secret_id"  # nosec B105 - a databag key, not a password
 
 _PASSWORD_BYTES = 32
+
+logger = logging.getLogger(__name__)
 
 
 def _label(relation_id: int) -> str:
@@ -40,40 +43,71 @@ def consumers(relations: list[ops.Relation]) -> dict[int, str]:
     return {relation.id: relation.app.name for relation in relations if relation.app is not None}
 
 
+def _find_owned_secret(model: ops.Model, label: str) -> ops.Secret | None:
+    """Look up an owned secret by label without reading its content.
+
+    `Model.get_secret` reads the content and raises `SecretNotFoundError` both when no secret
+    has the label and when the content of the tracked revision cannot be read. ops has no
+    public lookup by label that only reads metadata, hence the private backend.
+    """
+    secret = ops.Secret(model._backend, label=label)
+    try:
+        secret.get_info()
+    except ops.SecretNotFoundError:
+        return None
+    return secret
+
+
 def ensure_user_secret(model: ops.Model, relation_id: int, username: str) -> ops.Secret:
     """Get the credentials secret of a consumer relation, creating it if it does not exist.
 
-    An existing secret is returned unchanged, so the password is stable across reconciles and
-    leader changes. Only the leader may call this.
+    A readable secret is returned unchanged, so the password is stable across reconciles and
+    leader changes. A secret whose label exists but whose content cannot be read, as Juju
+    leaves behind when it saves a secret only partly, gets new content under the same
+    username. No one can have received the unreadable password. Only the leader may call this.
 
     Args:
         model: The charm's model.
         relation_id: ID of the consumer relation.
-        username: Username to store when the secret is created.
+        username: Username to store when the secret is created or replaced.
 
     Returns:
         The app-owned secret holding `username` and `password`.
     """
+    label = _label(relation_id)
     try:
-        return model.get_secret(label=_label(relation_id))
+        return model.get_secret(label=label)
     except ops.SecretNotFoundError:
-        content = {"username": username, "password": secrets.token_urlsafe(_PASSWORD_BYTES)}
-        return model.app.add_secret(content, label=_label(relation_id))
+        pass
+
+    content = {"username": username, "password": secrets.token_urlsafe(_PASSWORD_BYTES)}
+    secret = _find_owned_secret(model, label)
+    if secret is None:
+        return model.app.add_secret(content, label=label)
+    try:
+        # Owners track a revision too: after a replacement, the latest one is readable.
+        secret.get_content(refresh=True)
+    except ops.SecretNotFoundError:
+        logger.warning(
+            "Replacing the unreadable credentials secret of trino-catalog relation %r",
+            relation_id,
+        )
+        secret.set_content(content)
+    return secret
 
 
 def remove_user_secret(model: ops.Model, relation_id: int) -> None:
     """Remove the credentials secret of a consumer relation, if it exists.
 
-    Only the leader may call this.
+    A secret whose content cannot be read is removed too. Only the leader may call this.
 
     Args:
         model: The charm's model.
         relation_id: ID of the consumer relation.
     """
-    try:
-        model.get_secret(label=_label(relation_id)).remove_all_revisions()
-    except ops.SecretNotFoundError:
-        pass
+    secret = _find_owned_secret(model, _label(relation_id))
+    if secret is not None:
+        secret.remove_all_revisions()
 
 
 def app_name(relation: ops.Relation) -> str | None:

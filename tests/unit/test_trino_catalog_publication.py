@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import ops
 import pytest
-from conftest import FakeGateway
+from conftest import FakeGateway, latest_content
 from ops import testing
 
 import constants
@@ -179,6 +179,29 @@ def test_without_upstreams_consumer_is_published_with_no_catalogs(ctx: testing.C
 
     assert set(_published(state, consumer)) == PUBLISHED_KEYS
     assert json.loads(_published(state, consumer)["trino_catalogs"]) == []
+
+
+def test_consumer_with_an_unreadable_secret_is_published_with_a_readable_one(
+    ctx: testing.Context, unreadable_revisions: set[tuple[str, int]]
+):
+    """A secret Juju saved only partly is replaced, and the consumer gets its new content."""
+    consumer = _consumer()
+    stale = testing.Secret(
+        {"username": _username(consumer), "password": "never-readable"},
+        owner="app",
+        label=f"{constants.USER_SECRET_LABEL_PREFIX}{consumer.id}",
+    )
+    unreadable_revisions.add((stale.id, 1))
+    state = _state(consumer)
+    state = dataclasses.replace(state, secrets={*state.secrets, stale})
+
+    state_out = ctx.run(ctx.on.relation_changed(consumer), state)
+
+    secret = state_out.get_secret(id=stale.id)
+    assert _published(state_out, consumer)["trino_credentials_secret_id"] == stale.id
+    assert secret.remote_grants[consumer.id] == {consumer.remote_app_name}
+    assert set(latest_content(secret)) == {"username", "password"}
+    assert latest_content(secret)["username"] == _username(consumer)
 
 
 def test_consumer_without_app_name_is_not_published(ctx: testing.Context):

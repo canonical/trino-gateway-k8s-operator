@@ -66,8 +66,13 @@ run "postgresql_requirement" {
   }
 
   assert {
-    condition     = keys(output.requires) == ["backend_trino_catalog", "ingress", "postgresql"]
-    error_message = "Trino Gateway should only require the postgresql, backend_trino_catalog and ingress endpoints"
+    condition     = keys(output.requires) == ["backend_trino_catalog", "ingress", "oauth", "postgresql"]
+    error_message = "Trino Gateway should only require the postgresql, backend_trino_catalog, ingress and oauth endpoints"
+  }
+
+  assert {
+    condition     = output.requires.oauth.endpoint == "oauth" && output.requires.oauth.name == "trino-gateway-k8s"
+    error_message = "oauth requirement did not reference the application endpoint"
   }
 
   assert {

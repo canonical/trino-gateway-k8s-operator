@@ -16,6 +16,7 @@ import ops
 from charms.trino_k8s.v0.trino_catalog import TrinoCatalog, TrinoCatalogProvider
 
 import constants
+import owned_secrets
 
 _APP_NAME_KEY = "app_name"
 _SECRET_ID_KEY = "trino_credentials_secret_id"  # nosec B105 - a databag key, not a password
@@ -43,21 +44,6 @@ def consumers(relations: list[ops.Relation]) -> dict[int, str]:
     return {relation.id: relation.app.name for relation in relations if relation.app is not None}
 
 
-def _find_owned_secret(model: ops.Model, label: str) -> ops.Secret | None:
-    """Look up an owned secret by label without reading its content.
-
-    `Model.get_secret` reads the content and raises `SecretNotFoundError` both when no secret
-    has the label and when the content of the tracked revision cannot be read. ops has no
-    public lookup by label that only reads metadata, hence the private backend.
-    """
-    secret = ops.Secret(model._backend, label=label)
-    try:
-        secret.get_info()
-    except ops.SecretNotFoundError:
-        return None
-    return secret
-
-
 def ensure_user_secret(model: ops.Model, relation_id: int, username: str) -> ops.Secret:
     """Get the credentials secret of a consumer relation, creating it if it does not exist.
 
@@ -81,7 +67,7 @@ def ensure_user_secret(model: ops.Model, relation_id: int, username: str) -> ops
         pass
 
     content = {"username": username, "password": secrets.token_urlsafe(_PASSWORD_BYTES)}
-    secret = _find_owned_secret(model, label)
+    secret = owned_secrets.find(model, label)
     if secret is None:
         return model.app.add_secret(content, label=label)
     try:
@@ -105,7 +91,7 @@ def remove_user_secret(model: ops.Model, relation_id: int) -> None:
         model: The charm's model.
         relation_id: ID of the consumer relation.
     """
-    secret = _find_owned_secret(model, _label(relation_id))
+    secret = owned_secrets.find(model, _label(relation_id))
     if secret is not None:
         secret.remove_all_revisions()
 

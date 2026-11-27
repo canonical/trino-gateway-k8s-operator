@@ -18,18 +18,21 @@ class FakeGateway:
     Attributes:
         backends: The registered backends, by name.
         reachable: Whether API calls succeed.
+        api_keys: The API key of the client behind each call, in order.
     """
 
     def __init__(self):
         self.backends: dict[str, GatewayBackend] = {}
         self.reachable = True
+        self.api_keys: list[str | None] = []
 
     def register(self, *names: str) -> None:
         """Register backends by name, with placeholder values the charm will update."""
         for name in names:
             self.backends[name] = GatewayBackend(name, None, None, None, None)
 
-    def _check(self) -> None:
+    def _check(self, client: GatewayApiClient) -> None:
+        self.api_keys.append(client._api_key)
         if not self.reachable:
             raise GatewayApiError("connection refused")
 
@@ -45,16 +48,16 @@ def gateway(monkeypatch: pytest.MonkeyPatch) -> FakeGateway:
     """Replace the gateway API with an in-memory backend table."""
     fake = FakeGateway()
 
-    def list_backends(_: GatewayApiClient) -> list[GatewayBackend]:
-        fake._check()
+    def list_backends(client: GatewayApiClient) -> list[GatewayBackend]:
+        fake._check(client)
         return list(fake.backends.values())
 
-    def put(_: GatewayApiClient, backend: GatewayBackend) -> None:
-        fake._check()
+    def put(client: GatewayApiClient, backend: GatewayBackend) -> None:
+        fake._check(client)
         fake.backends[backend.name] = backend
 
-    def delete(_: GatewayApiClient, name: str) -> None:
-        fake._check()
+    def delete(client: GatewayApiClient, name: str) -> None:
+        fake._check(client)
         fake.backends.pop(name, None)
 
     monkeypatch.setattr(GatewayApiClient, "list_backends", list_backends)

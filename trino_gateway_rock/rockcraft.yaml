@@ -4,7 +4,7 @@
 name: trino-gateway
 base: bare
 build-base: ubuntu@24.04
-version: '21'
+version: '22'
 summary: Packages Trino Gateway in an OCI image.
 description: |
     The Trino Gateway rock packages application binaries
@@ -23,11 +23,11 @@ services:
 parts:
     trino-gateway:
         plugin: dump
-        source: https://maven-central.storage-download.googleapis.com/maven2/io/trino/gateway/gateway-ha/21/gateway-ha-21-jar-with-dependencies.jar
+        source: https://maven-central.storage-download.googleapis.com/maven2/io/trino/gateway/gateway-ha/22/gateway-ha-22-jar-with-dependencies.jar
         source-type: file
-        source-checksum: sha256/374d0ca46f5816f61b7ddf6b0961e92b3572ec2be30075373e93243ae35e0a68
+        source-checksum: sha256/abedd78029913e750969f7bc69f3ac42d7b7fea04895f1a13a85e4eed7ed3a26
         organize:
-            gateway-ha-21-jar-with-dependencies.jar: usr/lib/trino-gateway/gateway-ha-jar-with-dependencies.jar
+            gateway-ha-22-jar-with-dependencies.jar: usr/lib/trino-gateway/gateway-ha-jar-with-dependencies.jar
 
     runtime-packages:
         plugin: nil
@@ -37,3 +37,14 @@ parts:
             - openjdk-25-jre-headless
             - libstdc++6
 
+    # The JRE's cacerts links to /etc/ssl/certs/java/cacerts, which ca-certificates-java
+    # generates when a JRE is installed. Package scripts do not run for stage-packages, so the
+    # keystore is generated on the build host and copied in; without it, Java trusts no
+    # certificate authority.
+    java-cacerts:
+        plugin: nil
+        build-packages:
+            - ca-certificates-java
+            - openjdk-25-jre-headless
+        override-build: |
+            install -D -m 644 /etc/ssl/certs/java/cacerts "$CRAFT_PART_INSTALL/etc/ssl/certs/java/cacerts"

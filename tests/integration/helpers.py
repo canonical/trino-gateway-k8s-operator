@@ -93,3 +93,27 @@ def consumer_credentials(juju: jubilant.Juju, data: dict[str, str]) -> tuple[str
     """Read the username and password of the secret published to a consumer."""
     content = juju.show_secret(data["trino_credentials_secret_id"], reveal=True).content
     return content["username"], content["password"]
+
+
+def ingress_url(juju: jubilant.Juju, scheme: str = "", timeout: float = 600) -> str:
+    """Wait for the URL the ingress provider gives the gateway, as the gateway reads it.
+
+    The relation data is read rather than traefik's `show-proxied-endpoints` action, which
+    can report another URL in `subdomain` mode.
+
+    Args:
+        juju: The Juju client of the model.
+        scheme: The scheme to wait for, such as `https`, or empty for any.
+        timeout: How long to wait, in seconds.
+    """
+    deadline = time.monotonic() + timeout
+    url = None
+    while time.monotonic() < deadline:
+        unit_info = json.loads(juju.cli("show-unit", UNIT, "--format", "json"))[UNIT]
+        for relation in unit_info["relation-info"]:
+            if relation["endpoint"] == "ingress" and "ingress" in relation["application-data"]:
+                url = json.loads(relation["application-data"]["ingress"])["url"]
+        if url is not None and url.startswith(scheme):
+            return url
+        time.sleep(10)
+    raise AssertionError(f"no {scheme or 'ingress'} URL within {timeout}s, last: {url}")

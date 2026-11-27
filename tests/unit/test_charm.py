@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import ops
 import pytest
+import yaml
 from conftest import FakeGateway
 from ops import testing
 
@@ -455,3 +456,202 @@ def test_trino_credentials_secret_is_not_read(
     ctx.run(ctx.on.config_changed(), state)
 
     assert "secret:trino-user" not in requested
+
+
+PROVIDER_DATA = {
+    "issuer_url": "https://idp.example.com",
+    "authorization_endpoint": "https://idp.example.com/oauth2/auth",
+    "token_endpoint": "https://idp.example.com/oauth2/token",
+    "introspection_endpoint": "https://idp.example.com/admin/oauth2/introspect",
+    "userinfo_endpoint": "https://idp.example.com/userinfo",
+    "jwks_endpoint": "https://idp.example.com/.well-known/jwks.json",
+    "scope": "openid profile email",
+}
+
+
+def _ingress(url: str | None) -> testing.Relation:
+    data = {} if url is None else {"ingress": json.dumps({"url": url})}
+    return testing.Relation(
+        constants.INGRESS_RELATION, remote_app_name="traefik", remote_app_data=data
+    )
+
+
+def _client_secret(value: str = "client-s3cret") -> testing.Secret:
+    return testing.Secret({"secret": value})
+
+
+def _oauth(client_secret: testing.Secret | None = None) -> testing.Relation:
+    """Build an `oauth` relation, with the registered client if a secret is given."""
+    data = dict(PROVIDER_DATA)
+    if client_secret is not None:
+        data.update(client_id="gw-client", client_secret_id=client_secret.id)
+    return testing.Relation(
+        constants.OAUTH_RELATION, remote_app_name="hydra", remote_app_data=data
+    )
+
+
+def _oauth_state(*relations: testing.Relation, secrets=(), leader: bool = True):
+    state = _ready_state(leader=leader)
+    return dataclasses.replace(
+        state, relations={*state.relations, *relations}, secrets={*state.secrets, *secrets}
+    )
+
+
+def _gateway_config(ctx: testing.Context, state: testing.State) -> dict:
+    container = state.get_container(constants.CONTAINER_NAME)
+    path = container.get_filesystem(ctx) / constants.CONFIG_PATH.lstrip("/")
+    return yaml.safe_load(path.read_text())
+
+
+def _registered_redirect(state: testing.State, relation: testing.Relation) -> str | None:
+    return state.get_relation(relation.id).local_app_data.get("redirect_uri")
+
+
+@pytest.mark.parametrize(
+    ("ingress", "status"),
+    [
+        (None, testing.WaitingStatus("waiting for ingress URL for OAuth")),
+        (_ingress(None), testing.WaitingStatus("waiting for ingress URL for OAuth")),
+        (
+            _ingress("http://gw.example.com"),
+            testing.BlockedStatus("OAuth requires an HTTPS ingress URL"),
+        ),
+    ],
+)
+def test_oauth_without_https_ingress_lets_only_the_charm_in(
+    ctx: testing.Context, ingress: testing.Relation | None, status: ops.StatusBase
+):
+    """Without an HTTPS address, no client is registered and no user can log in."""
+    secret = _client_secret()
+    relation = _oauth(secret)
+    relations = [relation] if ingress is None else [relation, ingress]
+
+    state_out = ctx.run(ctx.on.config_changed(), _oauth_state(*relations, secrets=[secret]))
+
+    assert state_out.unit_status == status
+    assert _registered_redirect(state_out, relation) is None
+    authentication = _gateway_config(ctx, state_out)["authentication"]
+    assert "oauth" not in authentication
+    service = state_out.get_container(constants.CONTAINER_NAME).service_statuses
+    assert service[constants.SERVICE_NAME] == ops.pebble.ServiceStatus.ACTIVE
+
+
+def test_https_ingress_registers_the_gateway_callback(ctx: testing.Context):
+    relation = _oauth()
+    state = _oauth_state(relation, _ingress("https://gw.example.com:8443/"))
+
+    state_out = ctx.run(ctx.on.relation_changed(relation), state)
+
+    assert _registered_redirect(state_out, relation) == "https://gw.example.com:8443/oidc/callback"
+    assert state_out.unit_status == testing.WaitingStatus(
+        "waiting for OAuth provider registration"
+    )
+
+
+def test_registered_client_configures_the_oauth_login(ctx: testing.Context, gateway: FakeGateway):
+    secret = _client_secret()
+    relation = _oauth(secret)
+    state = _oauth_state(relation, _ingress("https://gw.example.com"), secrets=[secret])
+
+    state_out = ctx.run(ctx.on.relation_changed(relation), state)
+
+    oauth = _gateway_config(ctx, state_out)["authentication"]["oauth"]
+    assert oauth["clientId"] == "gw-client"
+    assert oauth["clientSecret"] == "client-s3cret"
+    assert oauth["redirectUrl"] == "https://gw.example.com/oidc/callback"
+    assert oauth["tokenEndpoint"] == PROVIDER_DATA["token_endpoint"]
+    container = state_out.get_container(constants.CONTAINER_NAME)
+    assert "client-s3cret" not in str(container.plan.to_dict())
+    api_key = (container.get_filesystem(ctx) / constants.API_KEY_PATH.lstrip("/")).read_text()
+    assert api_key not in str(container.plan.to_dict())
+    assert gateway.api_keys
+    assert set(gateway.api_keys) == {api_key}
+    assert state_out.unit_status == testing.ActiveStatus("no backends related")
+
+
+def test_ingress_address_change_updates_the_client(ctx: testing.Context):
+    secret = _client_secret()
+    relation, ingress = _oauth(secret), _ingress("https://gw.example.com")
+    state = ctx.run(
+        ctx.on.relation_changed(relation), _oauth_state(relation, ingress, secrets=[secret])
+    )
+
+    moved = dataclasses.replace(
+        ingress, remote_app_data={"ingress": json.dumps({"url": "https://new.example.com"})}
+    )
+    relations = {r for r in state.relations if r.id != ingress.id} | {moved}
+    state_out = ctx.run(
+        ctx.on.relation_changed(moved), dataclasses.replace(state, relations=relations)
+    )
+
+    redirect = "https://new.example.com/oidc/callback"
+    assert _registered_redirect(state_out, relation) == redirect
+    assert _gateway_config(ctx, state_out)["authentication"]["oauth"]["redirectUrl"] == redirect
+
+
+def test_client_secret_rotation_restarts_with_the_new_secret(ctx: testing.Context):
+    secret = _client_secret()
+    relation, ingress = _oauth(secret), _ingress("https://gw.example.com")
+    before = ctx.run(ctx.on.update_status(), _oauth_state(relation, ingress, secrets=[secret]))
+
+    rotated = dataclasses.replace(secret, latest_content={"secret": "rotated"})
+    secrets = {s for s in before.secrets if s.id != secret.id} | {rotated}
+    after = ctx.run(ctx.on.secret_changed(rotated), dataclasses.replace(before, secrets=secrets))
+
+    assert _gateway_config(ctx, after)["authentication"]["oauth"]["clientSecret"] == "rotated"
+    assert _config_hash(before) != _config_hash(after)
+
+
+def test_oauth_removal_opens_the_ui_and_api(ctx: testing.Context, gateway: FakeGateway):
+    secret = _client_secret()
+    relation = _oauth(secret)
+    state = ctx.run(
+        ctx.on.update_status(),
+        _oauth_state(relation, _ingress("https://gw.example.com"), secrets=[secret]),
+    )
+    gateway.register("stale")
+
+    state_out = ctx.run(ctx.on.relation_broken(state.get_relation(relation.id)), state)
+
+    config = _gateway_config(ctx, state_out)
+    assert "authentication" not in config
+    assert "authorization" not in config
+    assert gateway.backends == {}
+    assert state_out.unit_status == testing.ActiveStatus("no backends related")
+
+
+def test_follower_without_api_key_keeps_the_workload_untouched(ctx: testing.Context):
+    """A follower does not open the UI and API while it waits for the leader's key."""
+    state_out = ctx.run(ctx.on.config_changed(), _oauth_state(_oauth(), leader=False))
+
+    assert set(state_out.get_container(constants.CONTAINER_NAME).layers) == {"rock"}
+
+
+def test_redirect_uri_the_library_rejects_blocks(ctx: testing.Context):
+    relation = _oauth()
+
+    state_out = ctx.run(
+        ctx.on.relation_changed(relation), _oauth_state(relation, _ingress("https://gateway"))
+    )
+
+    assert _registered_redirect(state_out, relation) is None
+    assert isinstance(state_out.unit_status, testing.BlockedStatus)
+    assert state_out.unit_status.message.startswith("invalid OAuth client configuration")
+
+
+def test_unreadable_api_key_is_replaced_once(
+    ctx: testing.Context, gateway: FakeGateway, unreadable_revisions: set[tuple[str, int]]
+):
+    """A key secret Juju saved only partly gets a new key, which later hooks keep."""
+    stale = testing.Secret({"key": "lost"}, owner="app", label=constants.API_KEY_SECRET_LABEL)
+    unreadable_revisions.add((stale.id, 1))
+    state = _ready_state()
+    state = dataclasses.replace(state, secrets={*state.secrets, stale})
+
+    first = ctx.run(ctx.on.update_status(), state)
+    second = ctx.run(ctx.on.update_status(), first)
+
+    key = second.get_secret(label=constants.API_KEY_SECRET_LABEL).latest_content
+    assert key is not None and key["key"] != "lost"
+    assert _config_hash(first) == _config_hash(second)
+    assert set(gateway.api_keys) == {key["key"]}

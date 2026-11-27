@@ -25,6 +25,7 @@ from helpers import (
     UNIT,
     consumer_credentials,
     consumer_data,
+    ingress_url,
     relate_upstream,
     wait_for_consumer_data,
 )
@@ -33,22 +34,6 @@ POSTGRESQL = "postgresql-k8s"
 TRAEFIK = "traefik-k8s"
 TRINO = "trino"
 QUERY = "SELECT count(*) FROM system.runtime.nodes"
-
-
-def _ingress_url(juju: jubilant.Juju, timeout: float = 600) -> str:
-    """Wait for the URL traefik gives the gateway, as the gateway reads it.
-
-    The relation data is read rather than traefik's `show-proxied-endpoints` action, which
-    can report another URL in `subdomain` mode.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        unit_info = json.loads(juju.cli("show-unit", UNIT, "--format", "json"))[UNIT]
-        for relation in unit_info["relation-info"]:
-            if relation["endpoint"] == "ingress" and "ingress" in relation["application-data"]:
-                return json.loads(relation["application-data"]["ingress"])["url"]
-        time.sleep(10)
-    raise AssertionError(f"no ingress URL within {timeout}s")
 
 
 def _in_cluster_url(juju: jubilant.Juju) -> str:
@@ -147,7 +132,7 @@ class TestIngress:
         relate_upstream(juju, APP, TRINO)
         juju.integrate(f"{CONSUMER}:{CONSUMER_ENDPOINT}", f"{APP}:{CATALOG_ENDPOINT}")
         juju.integrate(f"{APP}:ingress", f"{TRAEFIK}:ingress")
-        ingress = urlsplit(_ingress_url(juju))
+        ingress = urlsplit(ingress_url(juju))
 
         data = wait_for_consumer_data(
             juju, lambda d: d.get("trino_url") == f"{ingress.hostname}:80"
@@ -161,12 +146,12 @@ class TestIngress:
     def test_query_through_ingress_succeeds(self, juju: jubilant.Juju):
         username, _ = consumer_credentials(juju, consumer_data(juju))
 
-        rows = _wait_for_query(juju, _ingress_url(juju).rstrip("/"), username)
+        rows = _wait_for_query(juju, ingress_url(juju).rstrip("/"), username)
 
         assert rows == [[1]]
 
     def test_web_ui_loads_through_ingress(self, juju: jubilant.Juju):
-        request = _request(juju, _ingress_url(juju).rstrip("/") + "/trino-gateway")
+        request = _request(juju, ingress_url(juju).rstrip("/") + "/trino-gateway")
 
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
             body = response.read().decode()

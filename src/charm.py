@@ -10,6 +10,7 @@ from collections.abc import Mapping
 import ops
 import pydantic
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.hydra.v0.oauth import ClientConfigError, OAuthRequirer
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from charms.trino_k8s.v0.trino_catalog import (
     TrinoCatalog,
@@ -28,13 +29,14 @@ from gateway_api import GatewayApiClient, GatewayApiError
 from relations import (
     backend_trino_catalog,
     ingress,
+    oauth,
     peer,
     trino_catalog,
     trino_gateway_integration,
 )
 from relations.backend_trino_catalog import RelatedBackends
 from relations.ingress import IngressAddress
-from workload import PostgresRelationModel
+from workload import GatewayAuth, OAuthLogin, PostgresRelationModel
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         self._ingress = IngressPerAppRequirer(
             self, constants.INGRESS_RELATION, port=constants.HTTP_PORT, scheme="http"
         )
+        self._oauth = OAuthRequirer(self, relation_name=constants.OAUTH_RELATION)
 
         for event in (
             self.on[constants.CONTAINER_NAME].pebble_ready,
@@ -80,6 +83,9 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_broken,
             self.on[constants.INGRESS_RELATION].relation_changed,
             self.on[constants.INGRESS_RELATION].relation_broken,
+            self.on[constants.OAUTH_RELATION].relation_created,
+            self.on[constants.OAUTH_RELATION].relation_changed,
+            self.on[constants.OAUTH_RELATION].relation_broken,
             self.on[constants.PEER_RELATION].relation_created,
         ):
             framework.observe(event, self._reconcile)
@@ -91,8 +97,9 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         Args:
             _: The event that triggered the reconcile, which does not affect the outcome.
         """
-        # Issuing users needs neither Pebble nor the database.
+        # Issuing users and registering the OAuth client need neither Pebble nor the database.
         self._issue_users()
+        self._publish_oauth_client()
 
         if not self._container.can_connect():
             return
@@ -102,14 +109,24 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         if pg is None:
             return
 
-        workload.apply(self._container, workload.render_config(pg))
+        api_key = gateway_api.ensure_api_key(self.model)
+        oauth_related = self.model.get_relation(constants.OAUTH_RELATION) is not None
+        if oauth_related and api_key is None:
+            # A follower waits for the leader's key rather than opening the UI and API.
+            return
+        auth = GatewayAuth(login=self._load_oauth_login()) if oauth_related else None
+        workload.apply(self._container, workload.render_config(pg, auth), api_key)
         self.unit.set_ports(constants.HTTP_PORT)
 
         if self.unit.is_leader():
-            self._register_and_publish()
+            self._register_and_publish(api_key)
 
-    def _register_and_publish(self) -> None:
-        """On the leader, sync the admitted backends and then publish to consumers."""
+    def _register_and_publish(self, api_key: str | None) -> None:
+        """On the leader, sync the admitted backends and then publish to consumers.
+
+        Args:
+            api_key: The key to sign the charm's API tokens with, if there is one.
+        """
         try:
             exclusions = catalogs.parse_exclusions(self._load_config().catalog_exclusions)
         except InvalidConfigError as e:
@@ -117,7 +134,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             logger.warning("Not publishing to consumers because the config is invalid: %s", e)
             exclusions = None
 
-        client = GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}")
+        client = _api_client(api_key)
         try:
             current = client.list_backends()
             inputs = self._policy_inputs(frozenset(b.name for b in current), exclusions or {})
@@ -155,6 +172,34 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             trino_catalog.publish(
                 self._trino_catalog_provider, relation, secret, url, publish[relation.id]
             )
+
+    def _publish_oauth_client(self) -> None:
+        """On the leader, register the OAuth client for the gateway's HTTPS ingress address."""
+        if not self.unit.is_leader() or self.model.get_relation(constants.OAUTH_RELATION) is None:
+            return
+        address = self._https_ingress()
+        if address is None:
+            return
+        try:
+            oauth.publish(self._oauth, address)
+        except ClientConfigError as e:
+            logger.error("Not registering the OAuth client: %s", e)
+
+    def _load_oauth_login(self) -> OAuthLogin | None:
+        """Load the OAuth login for the current ingress address, or None if it is not ready."""
+        address = self._https_ingress()
+        if address is None:
+            return None
+        client = oauth.load(self._oauth)
+        return None if client is None else OAuthLogin(client, oauth.redirect_uri(address))
+
+    def _https_ingress(self) -> IngressAddress | None:
+        """Load the ingress address if it is host-based and HTTPS, as OAuth needs."""
+        try:
+            address = self._load_ingress()
+        except PathBasedIngressError:
+            return None
+        return address if address is not None and address.scheme == "https" else None
 
     def _published_url(self) -> str:
         """Choose the `host:port` address published to consumers.
@@ -294,7 +339,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         event.add_status(ops.ActiveStatus("; ".join(messages)))
 
     def _add_input_statuses(self, event: ops.CollectStatusEvent) -> None:
-        """Add the Blocked statuses of an invalid configuration or ingress address.
+        """Add the statuses of an invalid configuration, ingress address or OAuth login.
 
         Args:
             event: The event that collects the statuses to report.
@@ -309,10 +354,38 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         except PathBasedIngressError as e:
             event.add_status(ops.BlockedStatus(str(e)))
 
+        self._add_oauth_status(event)
+
+    def _add_oauth_status(self, event: ops.CollectStatusEvent) -> None:
+        """Add the status of the OAuth login, while it is related but not ready.
+
+        Args:
+            event: The event that collects the statuses to report.
+        """
+        if self.model.get_relation(constants.OAUTH_RELATION) is None:
+            return
+        try:
+            address = self._load_ingress()
+        except PathBasedIngressError:
+            # Reported as the ingress status.
+            address = None
+        if address is None:
+            event.add_status(ops.WaitingStatus("waiting for ingress URL for OAuth"))
+        elif address.scheme != "https":
+            event.add_status(ops.BlockedStatus("OAuth requires an HTTPS ingress URL"))
+        else:
+            try:
+                oauth.client_config(address)
+            except ClientConfigError as e:
+                event.add_status(ops.BlockedStatus(f"invalid OAuth client configuration: {e}"))
+                return
+            if oauth.load(self._oauth) is None:
+                event.add_status(ops.WaitingStatus("waiting for OAuth provider registration"))
+
     def _evaluate_policy_for_status(self) -> PolicyResult | None:
         """Evaluate the policy from the current state, or None if the state is unavailable."""
         try:
-            current = GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}").list_backends()
+            current = _api_client(gateway_api.load_api_key(self.model)).list_backends()
         except GatewayApiError:
             return None
         inputs = self._policy_inputs(frozenset(b.name for b in current), {})
@@ -400,6 +473,11 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             )
         except (pydantic.ValidationError, ops.ModelError):
             return None
+
+
+def _api_client(api_key: str | None) -> GatewayApiClient:
+    """Build a client for the gateway's API on the local unit."""
+    return GatewayApiClient(f"http://localhost:{constants.HTTP_PORT}", api_key)
 
 
 def _count(n: int, noun: str) -> str:

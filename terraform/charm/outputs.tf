@@ -28,7 +28,7 @@ output "provides" {
 }
 
 output "requires" {
-  description = "Required endpoints keyed by name, each `{ kind = \"endpoint\", name = <application name>, endpoint = <relation endpoint> }`: `postgresql` (`postgresql_client` interface), `backend_trino_catalog` (`trino_catalog` interface, optional) and `ingress` (`ingress` interface, optional)."
+  description = "Required endpoints keyed by name, each `{ kind = \"endpoint\", name = <application name>, endpoint = <relation endpoint> }`: `postgresql` (`postgresql_client` interface), `backend_trino_catalog` (`trino_catalog` interface, optional), `ingress` (`ingress` interface, optional) and `oauth` (`oauth` interface, optional)."
   value = {
     for key, endpoint in local.required_endpoints : key => {
       kind     = "endpoint"

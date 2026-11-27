@@ -1,17 +1,24 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import base64
+import hashlib
+import hmac
 import io
 import json
+import time
 import urllib.error
 from unittest.mock import MagicMock, call
 
 import pytest
+import yaml
 
 import gateway_api
+import workload
 from core.backends import GatewayBackend
 from gateway_api import GatewayApiClient, GatewayApiError, sync_backends
 from relations.backend_trino_catalog import RelatedBackend
+from workload import GatewayAuth, PostgresRelationModel
 
 A = RelatedBackend(name="a", url="http://a:8080", catalogs=(), relation_id=1, remote_app="a")
 B = RelatedBackend(name="b", url="http://b:8080", catalogs=(), relation_id=2, remote_app="b")
@@ -64,6 +71,42 @@ def test_client_requests(monkeypatch: pytest.MonkeyPatch):
     assert requests[1].get_header("Content-type") == "application/json"
     assert requests[3].data == b"a"
     assert all(c.kwargs["timeout"] == gateway_api._TIMEOUT_SECONDS for c in urlopen.call_args_list)
+    assert not any(r.has_header("Authorization") for r in requests)
+
+
+def _b64decode(part: str) -> bytes:
+    return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+
+
+def test_client_authenticates_as_the_gateway_requires(monkeypatch: pytest.MonkeyPatch):
+    """The client's bearer token passes the JWT checks the rendered config sets up."""
+    pg = PostgresRelationModel.model_validate(
+        {
+            "database": "db",
+            "endpoints": "pg:5432",
+            "secret-user": {"username": "u", "password": "p"},
+        }
+    )
+    config = yaml.safe_load(workload.render_config(pg, GatewayAuth()))
+    jwt_config = config["authentication"]["jwt"]
+    urlopen = MagicMock()
+    urlopen.return_value.__enter__.return_value.read.return_value = b"[]"
+    monkeypatch.setattr(gateway_api.urllib.request, "urlopen", urlopen)
+
+    GatewayApiClient("http://localhost:8080", api_key="k" * 64).list_backends()
+
+    request = urlopen.call_args.args[0]
+    scheme, token = request.get_header("Authorization").split(" ")
+    header, claims, signature = token.split(".")
+    expected = hmac.new(b"k" * 64, f"{header}.{claims}".encode(), hashlib.sha256).digest()
+    claims = json.loads(_b64decode(claims))
+    assert scheme == "Bearer"
+    assert json.loads(_b64decode(header))["alg"] == "HS256"
+    assert hmac.compare_digest(_b64decode(signature), expected)
+    assert claims["iss"] == jwt_config["requiredIssuer"]
+    assert claims["aud"] == jwt_config["requiredAudience"]
+    assert claims["sub"] in config["presetUsers"]
+    assert claims["iat"] <= time.time() < claims["exp"]
 
 
 @pytest.mark.parametrize(

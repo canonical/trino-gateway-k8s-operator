@@ -39,6 +39,13 @@ class IngressAddress:
         """The `host:port` form consumers are given."""
         return f"{self.host}:{self.port}"
 
+    @property
+    def url(self) -> str:
+        """The base URL, without the port when it is the default of the scheme."""
+        if self.port == _DEFAULT_PORTS[self.scheme]:
+            return f"{self.scheme}://{self.host}"
+        return f"{self.scheme}://{self.authority}"
+
 
 def parse_url(url: str) -> IngressAddress:
     """Parse an ingress URL into a host-based address.

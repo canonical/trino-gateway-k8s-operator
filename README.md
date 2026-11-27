@@ -240,8 +240,64 @@ authentication: consumers given port `443` send their issued credentials, and th
 effect. Through an HTTP ingress or the in-cluster address, Trino trusts the username only.
 
 > [!WARNING]
-> The gateway's web UI and REST API are not authenticated. Relating ingress exposes them,
-> including the editing of the gateway's state, to everyone who can reach the ingress address.
+> Without an `oauth` relation, the gateway's web UI and REST API are not authenticated.
+> Relating ingress exposes them, including the editing of the gateway's state, to everyone who
+> can reach the ingress address. To require a login, relate an OAuth provider, as described in
+> [Authenticate the web UI and REST API](#authenticate-the-web-ui-and-rest-api).
+
+## Authenticate the web UI and REST API
+
+The charm requires an optional `oauth` relation, using the `oauth` interface, to make users log
+in to the gateway's web UI and REST API through an OAuth provider, such as the Canonical
+Identity Platform:
+
+```shell
+juju integrate trino-gateway-k8s:oauth <oauth-provider>:oauth
+```
+
+OAuth needs an HTTPS ingress address, as described in
+[Expose the gateway through ingress](#expose-the-gateway-through-ingress): the login sets a
+session cookie that browsers only send over HTTPS. Once the gateway has one, the charm
+registers an OAuth client whose redirect URI is the gateway's callback at that address, such as
+`https://trino-gateway.example.com/oidc/callback`, and configures the gateway with the client.
+When the address changes, the charm updates the client.
+
+| Status | Meaning |
+| --- | --- |
+| Waiting `waiting for ingress URL for OAuth` | Ingress is not related, has no address yet, or its address is path-based. |
+| Blocked `OAuth requires an HTTPS ingress URL` | The ingress address is HTTP. With traefik, relate it to a TLS certificates provider. |
+| Blocked `invalid OAuth client configuration: <error>` | The OAuth library rejects the redirect URI built from the ingress address. |
+| Waiting `waiting for OAuth provider registration` | The provider has not registered the client yet. |
+
+While the relation exists but OAuth is not configured, the gateway keeps serving queries and
+the charm keeps managing backends, but no user can log in to the web UI or REST API.
+
+Once OAuth is configured:
+
+- The web UI at `/trino-gateway` shows a login button that sends users to the provider.
+  Requests to the web UI's data and the REST API without a login are refused with HTTP `403`.
+- Every user who logs in gets read-only access to the web UI, including the query history of
+  queries run under their user ID, the `sub` claim of their ID token. No user can edit backends
+  or routing rules, or call the REST API under `/gateway`. The gateway answers such requests
+  with HTTP `200` and `"code": 401` in the body.
+- The charm calls the REST API to manage backends as the gateway user `juju:trino-gateway-k8s`,
+  with short-lived tokens signed with a key in a Juju secret owned by the application. The
+  gateway tries OAuth first, so it logs `Could not validate token or get claims from it` for
+  each of these calls.
+- A new client secret from the provider is applied automatically by restarting the gateway.
+
+Trino queries are not authenticated by the gateway: it passes them, with their credentials, to
+the Trino applications, which authenticate them as before. The gateway's own login uses the
+`/oidc/callback` path; requests to `/oauth2/*` are still forwarded to the Trino applications.
+Logging in to Trino through the gateway, such as with `trino --external-authentication`, is not
+supported.
+
+The gateway calls the provider's token and key endpoints itself and trusts only the
+certificate authorities of Ubuntu's `ca-certificates` package. The provider's endpoints must
+use a certificate from one of them; the charm ignores any CA certificate the provider sends,
+so logins fail with a provider that uses a self-signed or private certificate authority.
+
+When the `oauth` relation is removed, the web UI and REST API return to unauthenticated access.
 
 ## Connect a client
 
@@ -274,9 +330,13 @@ over plain HTTP.
 - Only a single unit is supported.
 - The gateway has no TLS listener of its own: TLS is only available through an ingress
   provider that terminates it, and only host-based ingress addresses are supported.
-- The gateway's admin web UI and REST API are not authenticated. Anyone who can reach port
-  `8080` or the ingress address can change the gateway's state, although the charm reverts
-  backend changes.
+- Without an `oauth` relation, the gateway's admin web UI and REST API are not authenticated.
+  Anyone who can reach port `8080` or the ingress address can change the gateway's state,
+  although the charm reverts backend changes.
+- With OAuth, some endpoints stay readable without a login: `/api/public/backends`, which
+  lists the names, URLs and states of the backends, and the metrics and JMX endpoints
+  `/metrics` and `/v1/jmx`. Logging out of the web UI does not end the session: the browser
+  keeps the ID token until it expires.
 - The charm owns the whole backend list and removes backends that it has not admitted from
   `backend-trino-catalog` and `trino-gateway-integration` relations.
 - All backends are in the single `adhoc` routing group, with no routing rules. See the

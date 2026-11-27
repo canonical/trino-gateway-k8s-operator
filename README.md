@@ -253,7 +253,8 @@ Kubernetes cluster, to its Service over HTTP, using their usual Trino credential
 http://trino-gateway-k8s.<model>.svc.cluster.local:8080
 ```
 
-The gateway passes credentials through to the Trino cluster unchanged. Each Trino cluster must be configured to work behind a proxy:
+The gateway passes credentials through to the Trino cluster unchanged. Each Trino cluster must
+be configured to work behind a proxy:
 
 - `http-server.process-forwarded=true`, so that follow-up URLs point at the gateway rather than
   the cluster.

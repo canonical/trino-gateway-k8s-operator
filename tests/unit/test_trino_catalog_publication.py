@@ -418,6 +418,78 @@ def test_without_peer_relation_nothing_is_registered(ctx: testing.Context, gatew
     assert gateway.backends == {}
 
 
+def _ingress(url: str | None = None) -> testing.Relation:
+    data = {} if url is None else {"ingress": json.dumps({"url": url})}
+    return testing.Relation(
+        constants.INGRESS_RELATION, remote_app_name="traefik", remote_app_data=data
+    )
+
+
+@pytest.mark.parametrize(
+    ("ingress_url", "trino_url"),
+    [
+        ("https://gw.example.com", "gw.example.com:443"),
+        ("http://gw.example.com/", "gw.example.com:80"),
+        ("https://gw.example.com:8443", "gw.example.com:8443"),
+    ],
+)
+def test_consumer_receives_the_host_based_ingress_address(
+    ctx: testing.Context, ingress_url: str, trino_url: str
+):
+    consumer, ingress = _consumer(), _ingress(ingress_url)
+
+    state = ctx.run(ctx.on.relation_changed(ingress), _state(consumer, ingress))
+
+    assert _published(state, consumer)["trino_url"] == trino_url
+    assert state.unit_status == testing.ActiveStatus("no backends related")
+
+
+def test_ingress_address_change_and_removal_republish_consumers(ctx: testing.Context):
+    consumer, ingress = _consumer(), _ingress("https://gw.example.com")
+    state = ctx.run(ctx.on.relation_changed(ingress), _state(consumer, ingress))
+
+    ingress = dataclasses.replace(
+        ingress, remote_app_data={"ingress": json.dumps({"url": "https://new.example.com"})}
+    )
+    state = ctx.run(ctx.on.relation_changed(ingress), _replace(state, ingress))
+    assert _published(state, consumer)["trino_url"] == "new.example.com:443"
+
+    state = ctx.run(ctx.on.relation_broken(state.get_relation(ingress.id)), state)
+    assert _published(state, consumer)["trino_url"] == URL
+
+
+@pytest.mark.parametrize("ingress_url", [None, "not a URL"])
+def test_ingress_without_valid_address_keeps_in_cluster_address(
+    ctx: testing.Context, ingress_url: str | None
+):
+    consumer, ingress = _consumer(), _ingress(ingress_url)
+
+    state = ctx.run(ctx.on.relation_changed(ingress), _state(consumer, ingress))
+
+    assert _published(state, consumer)["trino_url"] == URL
+    assert state.unit_status == testing.ActiveStatus("no backends related")
+
+
+def test_path_based_ingress_blocks_and_keeps_in_cluster_address(ctx: testing.Context):
+    consumer, ingress = _consumer(), _ingress("http://10.0.0.1/gw-model-trino-gateway-k8s")
+
+    state = ctx.run(ctx.on.relation_changed(ingress), _state(consumer, ingress))
+
+    assert _published(state, consumer)["trino_url"] == URL
+    assert state.unit_status == testing.BlockedStatus(
+        "ingress URL http://10.0.0.1/gw-model-trino-gateway-k8s is path-based;"
+        " a host-based ingress is required"
+    )
+
+
+def test_follower_reports_path_based_ingress(ctx: testing.Context):
+    ingress = _ingress("http://10.0.0.1/gw-model-trino-gateway-k8s")
+
+    state = ctx.run(ctx.on.update_status(), _state(ingress, leader=False))
+
+    assert isinstance(state.unit_status, testing.BlockedStatus)
+
+
 def test_app_name_is_none_without_remote_app():
     relation = SimpleNamespace(id=1, app=None)
 

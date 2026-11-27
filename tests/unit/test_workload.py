@@ -24,6 +24,7 @@ def test_render_config():
         "serverConfig": {
             "node.environment": constants.NODE_ENVIRONMENT,
             "http-server.http.port": 8080,
+            "http-server.process-forwarded": True,
         },
         "dataStore": {
             "jdbcUrl": "jdbc:postgresql://pg-0:5432/trino_gateway",

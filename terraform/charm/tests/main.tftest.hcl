@@ -66,8 +66,13 @@ run "postgresql_requirement" {
   }
 
   assert {
-    condition     = keys(output.requires) == ["backend_trino_catalog", "postgresql"]
-    error_message = "Trino Gateway should only require the postgresql and backend_trino_catalog endpoints"
+    condition     = keys(output.requires) == ["backend_trino_catalog", "ingress", "postgresql"]
+    error_message = "Trino Gateway should only require the postgresql, backend_trino_catalog and ingress endpoints"
+  }
+
+  assert {
+    condition     = output.requires.ingress.endpoint == "ingress" && output.requires.ingress.name == "trino-gateway-k8s"
+    error_message = "ingress requirement did not reference the application endpoint"
   }
 
   assert {

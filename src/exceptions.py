@@ -10,3 +10,7 @@ class MalformedIssuedUsersError(Exception):
 
 class InvalidConfigError(Exception):
     """The charm configuration is invalid."""
+
+
+class PathBasedIngressError(Exception):
+    """The ingress provider gave a URL with a path, which Trino clients cannot use."""

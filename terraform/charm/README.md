@@ -94,5 +94,5 @@ No modules.
 | <a name="output_application"></a> [application](#output\_application) | The full juju\_application resource for the deployed Trino Gateway charm. |
 | <a name="output_offers"></a> [offers](#output\_offers) | Offers keyed by offered endpoint, each `{ kind = "offer", url = <offer URL> }`. Empty unless `offered_endpoints` is set. |
 | <a name="output_provides"></a> [provides](#output\_provides) | Provided endpoints keyed by name, each `{ kind = "endpoint", name = <application name>, endpoint = <relation endpoint> }`: `trino_catalog` (`trino_catalog` interface) and `trino_gateway_integration` (`trino_gateway_integration` interface). |
-| <a name="output_requires"></a> [requires](#output\_requires) | Required endpoints keyed by name, each `{ kind = "endpoint", name = <application name>, endpoint = <relation endpoint> }`: `postgresql` (`postgresql_client` interface) and `backend_trino_catalog` (`trino_catalog` interface, optional). |
+| <a name="output_requires"></a> [requires](#output\_requires) | Required endpoints keyed by name, each `{ kind = "endpoint", name = <application name>, endpoint = <relation endpoint> }`: `postgresql` (`postgresql_client` interface), `backend_trino_catalog` (`trino_catalog` interface, optional) and `ingress` (`ingress` interface, optional). |
 <!-- END_TF_DOCS -->

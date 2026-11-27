@@ -10,6 +10,7 @@ from collections.abc import Mapping
 import ops
 import pydantic
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from charms.trino_k8s.v0.trino_catalog import (
     TrinoCatalog,
     TrinoCatalogProvider,
@@ -22,10 +23,17 @@ import workload
 from config import CharmConfig
 from core import catalogs, policy, upstreams, users
 from core.policy import Consumer, PolicyInputs, PolicyResult
-from exceptions import InvalidConfigError, MalformedIssuedUsersError
+from exceptions import InvalidConfigError, MalformedIssuedUsersError, PathBasedIngressError
 from gateway_api import GatewayApiClient, GatewayApiError
-from relations import backend_trino_catalog, peer, trino_catalog, trino_gateway_integration
+from relations import (
+    backend_trino_catalog,
+    ingress,
+    peer,
+    trino_catalog,
+    trino_gateway_integration,
+)
 from relations.backend_trino_catalog import RelatedBackends
+from relations.ingress import IngressAddress
 from workload import PostgresRelationModel
 
 logger = logging.getLogger(__name__)
@@ -47,6 +55,11 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         )
         self._trino_catalog = TrinoCatalogRequirer(self, constants.BACKEND_TRINO_CATALOG_RELATION)
         self._trino_catalog_provider = TrinoCatalogProvider(self, constants.TRINO_CATALOG_RELATION)
+        # Created before the reconcile observers, so the library has published the gateway's
+        # port and read the provider's URL by the time a reconcile runs in the same hook.
+        self._ingress = IngressPerAppRequirer(
+            self, constants.INGRESS_RELATION, port=constants.HTTP_PORT, scheme="http"
+        )
 
         for event in (
             self.on[constants.CONTAINER_NAME].pebble_ready,
@@ -65,6 +78,8 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_created,
             self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_changed,
             self.on[constants.TRINO_GATEWAY_INTEGRATION_RELATION].relation_broken,
+            self.on[constants.INGRESS_RELATION].relation_changed,
+            self.on[constants.INGRESS_RELATION].relation_broken,
             self.on[constants.PEER_RELATION].relation_created,
         ):
             framework.observe(event, self._reconcile)
@@ -130,7 +145,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             publish: The catalogs to publish, by consumer relation ID.
             consumers: The live consumers, by relation ID.
         """
-        url = trino_catalog.gateway_url(self.app.name, self.model.name)
+        url = self._published_url()
         for relation in self.model.relations[constants.TRINO_CATALOG_RELATION]:
             if relation.id not in publish:
                 continue
@@ -140,6 +155,20 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             trino_catalog.publish(
                 self._trino_catalog_provider, relation, secret, url, publish[relation.id]
             )
+
+    def _published_url(self) -> str:
+        """Choose the `host:port` address published to consumers.
+
+        Returns:
+            The ingress address if the provider gave a host-based one, else the in-cluster one.
+        """
+        try:
+            address = self._load_ingress()
+        except PathBasedIngressError:
+            address = None
+        if address is None:
+            return trino_catalog.gateway_url(self.app.name, self.model.name)
+        return address.authority
 
     def _policy_inputs(
         self, registered: frozenset[str], exclusions: dict[str, frozenset[str]]
@@ -247,10 +276,7 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
         elif self._container.can_connect() and not workload.is_running(self._container):
             event.add_status(ops.MaintenanceStatus("gateway service is not running"))
 
-        try:
-            self._load_config()
-        except InvalidConfigError as e:
-            event.add_status(ops.BlockedStatus(f"invalid catalog-exclusions: {e}"))
+        self._add_input_statuses(event)
 
         related = self._load_related_backends()
         messages = []
@@ -266,6 +292,22 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
             if result is not None:
                 messages.extend(self._add_policy_statuses(event, result))
         event.add_status(ops.ActiveStatus("; ".join(messages)))
+
+    def _add_input_statuses(self, event: ops.CollectStatusEvent) -> None:
+        """Add the Blocked statuses of an invalid configuration or ingress address.
+
+        Args:
+            event: The event that collects the statuses to report.
+        """
+        try:
+            self._load_config()
+        except InvalidConfigError as e:
+            event.add_status(ops.BlockedStatus(f"invalid catalog-exclusions: {e}"))
+
+        try:
+            self._load_ingress()
+        except PathBasedIngressError as e:
+            event.add_status(ops.BlockedStatus(str(e)))
 
     def _evaluate_policy_for_status(self) -> PolicyResult | None:
         """Evaluate the policy from the current state, or None if the state is unavailable."""
@@ -326,6 +368,14 @@ class TrinoGatewayK8SOperatorCharm(ops.CharmBase):
                 str(error.get("ctx", {}).get("error", error["msg"])) for error in e.errors()
             )
             raise InvalidConfigError("; ".join(reasons)) from e
+
+    def _load_ingress(self) -> IngressAddress | None:
+        """Load the ingress address, or None if ingress is not related or has no URL yet.
+
+        Raises:
+            PathBasedIngressError: if the provider gave a path-based URL.
+        """
+        return ingress.load(self._ingress)
 
     def _load_related_backends(self) -> RelatedBackends:
         """Read the backends of the Trino applications related over `backend-trino-catalog`.

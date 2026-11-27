@@ -68,6 +68,10 @@ def render_config(pg: PostgresRelationModel) -> str:
         "serverConfig": {
             "node.environment": constants.NODE_ENVIRONMENT,
             "http-server.http.port": constants.HTTP_PORT,
+            # Without it the gateway refuses requests carrying the ingress's X-Forwarded-*
+            # headers. With it, the gateway passes the client's scheme, host and port on to
+            # the backends, which build `nextUri` from them.
+            "http-server.process-forwarded": True,
         },
         "dataStore": {
             "jdbcUrl": f"jdbc:postgresql://{pg.endpoints}/{pg.database}",

@@ -19,12 +19,22 @@ from urllib.parse import urlsplit
 import jubilant
 import pytest
 from conftest import DeployTrino
-from helpers import APP, CATALOG_ENDPOINT, UNIT, backend_names, relate_upstream
+from helpers import (
+    APP,
+    CATALOG_ENDPOINT,
+    CONSUMER,
+    CONSUMER_ENDPOINT,
+    PUBLISHED_KEYS,
+    UNIT,
+    backend_names,
+    catalog_names,
+    consumer_credentials,
+    consumer_data,
+    relate_upstream,
+    wait_for_consumer_data,
+)
 
 POSTGRESQL = "postgresql-k8s"
-CONSUMER = "consumer"
-CONSUMER_UNIT = f"{CONSUMER}/0"
-CONSUMER_ENDPOINT = "backend-trino-catalog"
 TRINO_A, TRINO_B, TRINO_C = "trino-a", "trino-b", "trino-c"
 QUERY = "SELECT count(*) FROM system.runtime.nodes"
 # Hive catalogs need no secrets, and Trino starts without reaching their metastore.
@@ -40,45 +50,13 @@ CATALOG_CONFIG = textwrap.dedent("""\
         url: thrift://metastore.invalid:9083
 """)
 CATALOGS = ["marketing", "sales"]
-PUBLISHED_KEYS = {"trino_url", "trino_catalogs", "trino_credentials_secret_id"}
-
-
-def _consumer_data(juju: jubilant.Juju) -> dict[str, str]:
-    """Read the data the gateway published to the consumer, as the consumer sees it."""
-    unit_info = json.loads(juju.cli("show-unit", CONSUMER_UNIT, "--format", "json"))
-    relation = next(
-        r for r in unit_info[CONSUMER_UNIT]["relation-info"] if r["endpoint"] == CONSUMER_ENDPOINT
-    )
-    return relation.get("application-data", {})
-
-
-def _catalog_names(data: dict[str, str]) -> list[str]:
-    return sorted(c["name"] for c in json.loads(data["trino_catalogs"]))
-
-
-def _wait_for_consumer_data(juju: jubilant.Juju, check, timeout: float = 600) -> dict[str, str]:
-    """Poll the consumer's relation data until `check` accepts it."""
-    deadline = time.monotonic() + timeout
-    data: dict[str, str] = {}
-    while time.monotonic() < deadline:
-        data = _consumer_data(juju)
-        if check(data):
-            return data
-        time.sleep(10)
-    raise AssertionError(f"consumer data never matched: {data}")
-
-
-def _credentials(juju: jubilant.Juju, data: dict[str, str]) -> tuple[str, str]:
-    content = juju.show_secret(data["trino_credentials_secret_id"], reveal=True).content
-    return content["username"], content["password"]
 
 
 def _query(juju: jubilant.Juju, credentials: tuple[str, str], timeout: float = 120) -> list:
     """Run a query through the gateway Service as the consumer's user.
 
-    Over plain HTTP, Trino refuses passwords and trusts the username, and the gateway rejects
-    `X-Forwarded-Proto`, so only the username can be checked end to end. Follow-up URLs are sent
-    to the gateway's own address.
+    Over plain HTTP, Trino refuses passwords and trusts the username, so only the username can
+    be checked end to end. Follow-up URLs are sent to the gateway's own address.
     """
     base = f"http://{juju.status().apps[APP].address}:8080"
     headers = {"X-Trino-User": credentials[0]}
@@ -151,16 +129,16 @@ class TestTrinoCatalog:
         relate_upstream(juju, APP, TRINO_A)
         juju.integrate(f"{CONSUMER}:{CONSUMER_ENDPOINT}", f"{APP}:{CATALOG_ENDPOINT}")
 
-        data = _wait_for_consumer_data(
-            juju, lambda d: PUBLISHED_KEYS <= d.keys() and _catalog_names(d) == CATALOGS
+        data = wait_for_consumer_data(
+            juju, lambda d: PUBLISHED_KEYS <= d.keys() and catalog_names(d) == CATALOGS
         )
 
         assert data["trino_url"] == f"{APP}.{juju.model}.svc.cluster.local:8080"
-        assert _catalog_names(data) == CATALOGS
+        assert catalog_names(data) == CATALOGS
         assert backend_names(juju) == {TRINO_A}
 
     def test_query_through_gateway_succeeds(self, juju: jubilant.Juju):
-        credentials = _credentials(juju, _consumer_data(juju))
+        credentials = consumer_credentials(juju, consumer_data(juju))
 
         rows = _wait_for_query(juju, credentials)
 
@@ -168,8 +146,8 @@ class TestTrinoCatalog:
 
     def test_second_upstream_does_not_interrupt_the_consumer(self, juju: jubilant.Juju):
         """Queries keep succeeding while a second upstream is added and registered."""
-        before = _consumer_data(juju)
-        credentials = _credentials(juju, before)
+        before = consumer_data(juju)
+        credentials = consumer_credentials(juju, before)
 
         relate_upstream(juju, APP, TRINO_B)
         deadline = time.monotonic() + 15 * 60
@@ -182,7 +160,7 @@ class TestTrinoCatalog:
         for _ in range(10):
             assert _query(juju, credentials) == [[1]]
 
-        assert _consumer_data(juju) == before
+        assert consumer_data(juju) == before
 
     def test_upstream_without_integration_is_never_registered(self, juju: jubilant.Juju):
         juju.integrate(f"{APP}:backend-trino-catalog", f"{TRINO_C}:{CATALOG_ENDPOINT}")
@@ -201,6 +179,6 @@ class TestTrinoCatalog:
     def test_excluded_catalog_is_missing(self, juju: jubilant.Juju):
         juju.config(APP, {"catalog-exclusions": f"{CONSUMER}: [sales]"})
 
-        data = _wait_for_consumer_data(juju, lambda d: _catalog_names(d) == ["marketing"])
+        data = wait_for_consumer_data(juju, lambda d: catalog_names(d) == ["marketing"])
 
         assert PUBLISHED_KEYS <= data.keys()

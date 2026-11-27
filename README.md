@@ -117,7 +117,9 @@ user once the user can log in on it.
 
 A consumer is **published** once the gateway has written its connection data to the relation:
 
-- the gateway's in-cluster address, `trino-gateway-k8s.<model>.svc.cluster.local:8080`;
+- the gateway's address: its ingress address when it has one, as described in
+  [Expose the gateway through ingress](#expose-the-gateway-through-ingress), otherwise its
+  in-cluster address, `trino-gateway-k8s.<model>.svc.cluster.local:8080`;
 - the union of the catalogs of the registered Trino applications that confirmed its user,
   minus any catalogs excluded for it;
 - the ID of its credentials secret, which is granted to that relation only.
@@ -186,41 +188,95 @@ Excluded catalogs are only hidden from the relation data: a consumer can still q
   [Connect consumers](#connect-consumers).
 - Over plain HTTP, Trino trusts the username and ignores the password, and consumers such as
   Superset and DataHub leave the password out unless the port is `443`. The credentials only
-  take effect once both the gateway and Trino are reached over HTTPS; mixing HTTP and HTTPS
-  fails.
-- In cross-model setups, each Trino application must publish an address the gateway can reach,
-  and the gateway publishes its in-cluster address, which only consumers in the same
-  Kubernetes cluster can reach.
+  take effect when consumers reach the gateway through an HTTPS ingress, as described in
+  [Expose the gateway through ingress](#expose-the-gateway-through-ingress).
+- In cross-model setups, each Trino application must publish an address the gateway can reach.
+  Without ingress, the gateway publishes its in-cluster address, which only consumers in the
+  same Kubernetes cluster can reach.
 - Operators must not configure users whose names start with `gw-` on a related Trino
   application: Trino refuses the gateway's user of the same name.
 
+## Expose the gateway through ingress
+
+The charm requires an optional `ingress` relation, using the `ingress` interface, to make the
+gateway reachable from outside the Kubernetes cluster. The ingress provider terminates TLS;
+the gateway keeps listening on plain HTTP on port `8080`.
+
+The ingress address must be host-based, such as `https://trino-gateway.example.com`: Trino
+clients and the `trino-catalog` interface cannot use a path prefix. Use a provider that gives
+each application its own host name, such as `traefik-k8s` with `routing_mode=subdomain`, or
+`gateway-api-integrator`:
+
+```shell
+juju deploy traefik-k8s --trust --config routing_mode=subdomain --config external_hostname=<domain>
+juju integrate trino-gateway-k8s:ingress traefik-k8s:ingress
+```
+
+With traefik in `subdomain` mode, the gateway is served at
+`<scheme>://<model>-trino-gateway-k8s.<domain>`, and the `ingress` relation data in
+`juju show-unit trino-gateway-k8s/0` shows the address. Traefik serves HTTPS once it is related
+to a TLS certificates provider.
+
+Once the provider gives a host-based address:
+
+- Trino clients, the web UI at `/trino-gateway` and the REST API are reachable at the ingress
+  address. The in-cluster address on port `8080` keeps working.
+- Every published consumer is given the ingress host and port as `trino_url`, such as
+  `trino-gateway.example.com:443`, using the default port of the scheme when the address has
+  none. When the address changes or the relation is removed, consumers are given the new
+  address or the in-cluster address again.
+
+Until the provider gives an address, consumers keep the in-cluster address and the status does
+not change. If the address is path-based, the unit is Blocked with
+`ingress URL <url> is path-based; a host-based ingress is required` and consumers keep the
+in-cluster address; switch the provider to host-based addresses to resolve it.
+
+The gateway processes the `X-Forwarded-*` headers set by the ingress and passes the client's
+scheme, host and port on to the Trino clusters, so the follow-up URLs (`nextUri`) clients
+receive point at the ingress address.
+
+Through an HTTPS ingress, Trino receives the forwarded HTTPS protocol, so it accepts password
+authentication: consumers given port `443` send their issued credentials, and they take
+effect. Through an HTTP ingress or the in-cluster address, Trino trusts the username only.
+
+> [!WARNING]
+> The gateway's web UI and REST API are not authenticated. Relating ingress exposes them,
+> including the editing of the gateway's state, to everyone who can reach the ingress address.
+
 ## Connect a client
 
-Clients connect to the gateway's Kubernetes Service over HTTP, using their usual Trino
-credentials:
+Clients connect to the gateway at its ingress address, as described in
+[Expose the gateway through ingress](#expose-the-gateway-through-ingress), or, inside the
+Kubernetes cluster, to its Service over HTTP, using their usual Trino credentials:
 
 ```text
 http://trino-gateway-k8s.<model>.svc.cluster.local:8080
 ```
 
-The gateway passes credentials through to the Trino cluster unchanged. Because the connection
-is plain HTTP, each Trino cluster must be configured to work behind a proxy:
+The gateway passes credentials through to the Trino cluster unchanged. Each Trino cluster must
+be configured to work behind a proxy:
 
 - `http-server.process-forwarded=true`, so that follow-up URLs point at the gateway rather than
   the cluster.
 - `http-server.authentication.allow-insecure-over-http=true`, so that clients can authenticate
-  with a user name only. Trino accepts passwords over HTTP only when the forwarded protocol is
-  HTTPS, so password authentication through the gateway is not possible until TLS is supported.
+  with a user name only over plain HTTP. Trino accepts passwords over HTTP only when the
+  forwarded protocol is HTTPS, so password authentication through the gateway needs an HTTPS
+  ingress.
 
 The `trino-k8s` charm sets both.
+
+The gateway also processes the `X-Forwarded-*` headers of in-cluster clients, so a client that
+sends `X-Forwarded-Proto: https` to the in-cluster address makes Trino accept its password
+over plain HTTP.
 
 ## Limitations
 
 - Only a single unit is supported.
-- There is no TLS and no ingress; clients connect over plain HTTP to the in-cluster Service
-  address only.
+- The gateway has no TLS listener of its own: TLS is only available through an ingress
+  provider that terminates it, and only host-based ingress addresses are supported.
 - The gateway's admin web UI and REST API are not authenticated. Anyone who can reach port
-  `8080` can change the gateway's state, although the charm reverts backend changes.
+  `8080` or the ingress address can change the gateway's state, although the charm reverts
+  backend changes.
 - The charm owns the whole backend list and removes backends that it has not admitted from
   `backend-trino-catalog` and `trino-gateway-integration` relations.
 - All backends are in the single `adhoc` routing group, with no routing rules. See the

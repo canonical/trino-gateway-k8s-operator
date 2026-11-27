@@ -11,6 +11,7 @@ locals {
   }
   required_endpoints = {
     backend_trino_catalog = "backend-trino-catalog"
+    ingress               = "ingress"
     postgresql            = "postgresql"
   }
 }

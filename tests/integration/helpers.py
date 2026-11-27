@@ -12,6 +12,12 @@ APP = "trino-gateway-k8s"
 UNIT = f"{APP}/0"
 CATALOG_ENDPOINT = "trino-catalog"
 INTEGRATION_ENDPOINT = "trino-gateway-integration"
+# A second gateway application without PostgreSQL stands in for a consumer: it requires
+# `trino-catalog` through the same charm library as real consumers.
+CONSUMER = "consumer"
+CONSUMER_UNIT = f"{CONSUMER}/0"
+CONSUMER_ENDPOINT = "backend-trino-catalog"
+PUBLISHED_KEYS = {"trino_url", "trino_catalogs", "trino_credentials_secret_id"}
 
 
 def relate_upstream(juju: jubilant.Juju, gateway: str, trino: str) -> None:
@@ -55,3 +61,35 @@ def wait_for_backends(juju: jubilant.Juju, expected: list[dict], timeout: float 
             return
         time.sleep(10)
     raise AssertionError(f"gateway backends {current} never matched {expected}")
+
+
+def consumer_data(juju: jubilant.Juju) -> dict[str, str]:
+    """Read the data the gateway published to the consumer, as the consumer sees it."""
+    unit_info = json.loads(juju.cli("show-unit", CONSUMER_UNIT, "--format", "json"))
+    relation = next(
+        r for r in unit_info[CONSUMER_UNIT]["relation-info"] if r["endpoint"] == CONSUMER_ENDPOINT
+    )
+    return relation.get("application-data", {})
+
+
+def catalog_names(data: dict[str, str]) -> list[str]:
+    """List the names of the catalogs published to a consumer."""
+    return sorted(c["name"] for c in json.loads(data["trino_catalogs"]))
+
+
+def wait_for_consumer_data(juju: jubilant.Juju, check, timeout: float = 600) -> dict[str, str]:
+    """Poll the consumer's relation data until `check` accepts it."""
+    deadline = time.monotonic() + timeout
+    data: dict[str, str] = {}
+    while time.monotonic() < deadline:
+        data = consumer_data(juju)
+        if check(data):
+            return data
+        time.sleep(10)
+    raise AssertionError(f"consumer data never matched: {data}")
+
+
+def consumer_credentials(juju: jubilant.Juju, data: dict[str, str]) -> tuple[str, str]:
+    """Read the username and password of the secret published to a consumer."""
+    content = juju.show_secret(data["trino_credentials_secret_id"], reveal=True).content
+    return content["username"], content["password"]

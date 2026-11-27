@@ -1,7 +1,7 @@
 # Trino Gateway rock
 
-An OCI image of [Trino Gateway](https://trinodb.github.io/trino-gateway/) 21 on a `bare` base. It
-contains the Gateway jar and the OpenJDK 25 JRE.
+An OCI image of [Trino Gateway](https://trinodb.github.io/trino-gateway/) 22 on a `bare` base. It
+contains the Gateway jar, the OpenJDK 25 JRE, and a Java truststore of the Ubuntu CA certificates.
 
 ## Runtime
 
